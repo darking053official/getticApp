@@ -1,46 +1,4 @@
-import 'profile.dart';
-
-class Conversation {
-  final String id;
-  final String type;
-  final String? name;
-  final List<Profile> members;
-  final DateTime updatedAt;
-  final String? lastMessage;
-  final DateTime? lastMessageTime;
-
-  Conversation({
-    required this.id,
-    required this.type,
-    this.name,
-    required this.members,
-    required this.updatedAt,
-    this.lastMessage,
-    this.lastMessageTime,
-  });
-
-  factory Conversation.fromJson(Map<String, dynamic> json, {String? currentUserId}) {
-    var memberList = (json['conversation_members'] as List? ?? [])
-        .map((e) => Profile.fromJson(e['profiles']))
-        .toList();
-
-    return Conversation(
-      id: json['id'],
-      type: json['type'],
-      name: json['name'],
-      members: memberList,
-      updatedAt: DateTime.parse(json['updated_at']),
-    );
-  }
-
-  Profile getOtherMember(String myId) {
-    if (type == 'group') {
-      return Profile(id: id, username: name ?? 'Grup');
-    }
-    try {
-      return members.firstWhere((m) => m.id != myId);
-    } catch (e) {
-      return Profile(id: '', username: 'Bilinmeyen');
-    }
-  }
+class AppConstants {
+  static const String supabaseUrl = 'https://ayucfychcemsvzlgsdqq.supabase.co';
+  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5dWNmeWNoY2Vtc3Z6bGdzZHFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4MDAwODksImV4cCI6MjEwNDM3NjA4OX0.XhXZjzy58cWuAhejswK_44_Y8JJKdSzPI4QCUrS8ipg';
 }
