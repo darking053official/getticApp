@@ -1,21 +1,35 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'core/constants.dart';
 import 'core/theme.dart';
 import 'pages/auth_page.dart';
 import 'pages/chat_list_page.dart';
 
+// Supabase AuthState'ini global olarak dinleyen Riverpod Provider.
+// Bu provider, uygulamanın her yerinden oturum durumuna erişmemizi sağlar.
+final authStateProvider = StreamProvider<AuthState>((ref) {
+  return Supabase.instance.client.auth.onAuthStateChange;
+});
+
 void main() async {
   // Flutter motorunu başlat
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Supabase bağlantısını başlat (Anahtarlar constants.dart'tan geliyor)
+  // Türkçe tarih formatlaması için lokalizasyonu başlat
+  // (AppUtils içindeki DateFormat('...', 'tr_TR') fonksiyonları için gerekli)
+  await initializeDateFormatting('tr_TR', null);
+
+  // Supabase bağlantısını başlat
   await Supabase.initialize(
     url: AppConstants.supabaseUrl,
     anonKey: AppConstants.supabaseAnonKey,
   );
 
-  runApp(const GetticApp());
+  // Uygulamayı ProviderScope ile sarmalayarak Riverpod'u aktif et
+  runApp(const ProviderScope(child: GetticApp()));
 }
 
 class GetticApp extends StatelessWidget {
@@ -25,44 +39,60 @@ class GetticApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Gettic',
-      debugShowCheckedModeBanner: false, // Sağ üstteki DEBUG şeridini kaldırır
-      theme: GetticTheme.darkTheme,      // Premium Karanlık Temamız
-      home: const AuthWrapper(),         // Oturum kontrolünü yapan yapı
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.darkTheme, // Premium Karanlık Temamız
+      home: const AuthWrapper(), // Oturum kontrolünü yapan yapı
     );
   }
 }
 
-// Kullanıcının giriş yapıp yapmadığını kontrol eden yapı
-class AuthWrapper extends StatefulWidget {
+// Kullanıcının giriş yapıp yapmadığını kontrol eden ve 
+// duruma göre yönlendirme yapan yapı.
+class AuthWrapper extends ConsumerWidget {
   const AuthWrapper({super.key});
 
   @override
-  State<AuthWrapper> createState() => _AuthWrapperState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Riverpod üzerinden AuthState stream'ini dinliyoruz
+    final authStateAsync = ref.watch(authStateProvider);
 
-class _AuthWrapperState extends State<AuthWrapper> {
-  @override
-  void initState() {
-    super.initState();
-    
-    // Supabase'de oturum durumu değiştiğinde (giriş/çıkış) ekranı yeniler
-    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      final AuthChangeEvent event = data.event;
-      if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.signedOut) {
-        if (mounted) setState(() {});
-      }
-    });
-  }
+    return authStateAsync.when(
+      // Yükleniyor durumunda (Splash Screen)
+      loading: () => const Scaffold(
+        backgroundColor: AppTheme.background,
+        body: Center(
+          child: CircularProgressIndicator(color: AppTheme.primary),
+        ),
+      ),
+      
+      // Hata durumu (Nadir de olsa bağlantı kopmalarında)
+      error: (error, stackTrace) => Scaffold(
+        backgroundColor: AppTheme.background,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Text(
+              'Bağlantı hatası oluştu.\nLütfen uygulamayı yeniden başlatın.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+            ),
+          ),
+        ),
+      ),
+      
+      // Veri geldiğinde oturum kontrolü yap
+      data: (authState) {
+        // Supabase'de aktif bir oturum var mı?
+        final session = authState.session;
 
-  @override
-  Widget build(BuildContext context) {
-    // Eğer aktif bir oturum varsa Sohbet Listesine, yoksa Giriş sayfasına yönlendir
-    final session = Supabase.instance.client.auth.currentSession;
-    
-    if (session == null) {
-      return const AuthPage();
-    } else {
-      return const ChatListPage();
-    }
+        if (session == null) {
+          // Oturum yoksa Giriş/Kayıt sayfasına yönlendir
+          return const AuthPage();
+        } else {
+          // Oturum varsa Sohbet Listesine yönlendir
+          return const ChatListPage();
+        }
+      },
+    );
   }
 }
