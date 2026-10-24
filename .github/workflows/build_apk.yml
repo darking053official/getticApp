@@ -24,16 +24,27 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
       
-      # Eksik android, ios, web klasörlerini oluşturur
+      # Eksik android klasörünü oluşturur
       - name: Ensure Flutter project structure
         run: flutter create . --project-name gettic_mobile --org com.gettic
       
-      # Paket adını gettic.by.darking053 olarak ayarlar
+      # Paket adını gettic.by.darking053 yapar
       - name: Set Application ID
         run: |
           if [ -f "android/app/build.gradle" ]; then
             sed -i 's/applicationId ".*"/applicationId "gettic.by.darking053"/' android/app/build.gradle
             sed -i 's/applicationId = ".*"/applicationId = "gettic.by.darking053"/' android/app/build.gradle.kts 2>/dev/null || true
+          fi
+      
+      # İNTERNET İZNİNİ OTOMATİK EKLE (YENİ ADIM)
+      - name: Add Internet Permission to Manifest
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            # Eğer internet izni yoksa manifest dosyasına ekle
+            if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
+              sed -i '/<manifest /a \    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+            fi
           fi
       
       - name: Get dependencies
