@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
 import 'pages/auth_page.dart';
-import 'pages/chat_page.dart';
+import 'pages/chat_list_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +47,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
   @override
   Widget build(BuildContext context) {
     final session = Supabase.instance.client.auth.currentSession;
-    return session == null ? const AuthPage() : const ChatPage();
+    return session == null ? const AuthPage() : const ChatListPage();
   }
 }
