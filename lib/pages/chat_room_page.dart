@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../core/theme.dart';
 import '../models/message.dart';
 import '../models/profile.dart';
@@ -25,14 +25,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   
-  Stream<List<Message>>? _messagesStream;
+  late final Stream<List<Message>> _messagesStream;
   bool _isSending = false;
+  bool _isTyping = false; // İleride typing indicator için
 
   @override
   void initState() {
     super.initState();
-    // Realtime Stream'i başlatıyoruz. 
-    // Bu, Supabase üzerinden gelen anlık değişiklikleri otomatik dinler.
+    // Realtime Stream (Supabase v2 .stream() ile)
     _messagesStream = _service.streamMessages(widget.conversationId);
   }
 
@@ -52,7 +52,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     final text = _messageController.text.trim();
     if (text.isEmpty || _isSending) return;
 
-    // Kullanıcı deneyimi için inputu hemen temizle (Optimistic UI)
+    // Optimistic UI - Mesaj gitmese bile input temizlenir
     _messageController.clear();
     setState(() => _isSending = true);
 
@@ -61,7 +61,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       _scrollToBottom();
     } catch (e) {
       if (mounted) {
-        // Hata durumunda inputu geri yükle ve kullanıcıyı bilgilendir
+        // Hata olursa mesajı geri koy
         _messageController.text = text;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -88,11 +88,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     final timeFormat = DateFormat('HH:mm');
 
     return Scaffold(
-      // Klavye açıldığında ekranın küçülmesini sağlar
       resizeToAvoidBottomInset: true, 
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: AppTheme.surface,
+        elevation: 0,
         titleSpacing: 0,
         title: Row(
           children: [
@@ -100,7 +100,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               backgroundColor: AppTheme.primary,
               radius: 18,
               backgroundImage: widget.otherUser.avatarUrl != null
-                  ? NetworkImage(widget.otherUser.avatarUrl!)
+                  ? CachedNetworkImageProvider(widget.otherUser.avatarUrl!)
                   : null,
               child: widget.otherUser.avatarUrl == null
                   ? Text(
@@ -108,9 +108,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           ? widget.otherUser.username[0].toUpperCase() 
                           : '?',
                       style: const TextStyle(
-                          fontSize: 16, 
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold
+                        fontSize: 16, 
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold
                       ),
                     )
                   : null,
@@ -128,10 +128,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       color: AppTheme.textPrimary,
                     ),
                   ),
-                  // İleride online durum göstergesi eklenebilir
-                  const Text(
-                    'Çevrimiçi', 
-                    style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  Text(
+                    // İleride show_online_status ve status ile dinamik yapılabilir
+                    _isTyping ? 'yazıyor...' : 'Çevrimiçi', 
+                    style: TextStyle(
+                      fontSize: 12, 
+                      color: _isTyping ? AppTheme.primary : AppTheme.textSecondary,
+                      fontStyle: _isTyping ? FontStyle.italic : FontStyle.normal,
+                    ),
                   ),
                 ],
               ),
@@ -154,7 +158,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 if (snapshot.hasError) {
                   return Center(
                     child: Text(
-                      'Mesajlar yüklenemedi.',
+                      'Mesajlar yüklenemedi.\n${snapshot.error}',
+                      textAlign: TextAlign.center,
                       style: const TextStyle(color: AppTheme.textSecondary),
                     ),
                   );
@@ -163,10 +168,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 final messages = snapshot.data ?? [];
                 
                 if (messages.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      'Henüz mesaj yok. İlk mesajı sen gönder!',
-                      style: TextStyle(color: AppTheme.textSecondary),
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.waving_hand_outlined, size: 48, color: AppTheme.surface),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'İlk mesajı sen gönder!',
+                          style: TextStyle(color: AppTheme.textSecondary),
+                        ),
+                      ],
                     ),
                   );
                 }
@@ -182,7 +194,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                     final msg = messages[index];
                     final isMine = msg.senderId == myId;
                     
-                    // Aynı kişiden ardışık gelen mesajlarda zaman damgasını gizlemek için kontrol
+                    // Aynı kişiden 5 dk içinde gelen mesajlarda zaman damgasını gizle
                     final showTimestamp = index == 0 || 
                         messages[index - 1].senderId != msg.senderId ||
                         msg.createdAt.difference(messages[index - 1].createdAt).inMinutes > 5;
@@ -195,7 +207,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                             padding: const EdgeInsets.only(top: 12, bottom: 6, left: 8, right: 8),
                             child: Text(
                               timeFormat.format(msg.createdAt),
-                              style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                              style: const TextStyle(
+                                fontSize: 11, 
+                                color: AppTheme.textSecondary,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
                         Align(
@@ -214,7 +230,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                 bottomLeft: Radius.circular(isMine ? 16 : 4),
                                 bottomRight: Radius.circular(isMine ? 4 : 16),
                               ),
-                              border: isMine ? null : Border.all(color: AppTheme.border, width: 1),
+                              // ⚠️ DÜZELTME: AppTheme.border -> AppTheme.inputBorder
+                              border: isMine ? null : Border.all(color: AppTheme.inputBorder, width: 1),
                             ),
                             child: Text(
                               msg.content,
@@ -240,8 +257,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               left: 16,
               right: 16,
               top: 12,
-              // Klavye açıksa alt boşluğu ayarla
-              bottom: MediaQuery.of(context).viewInsets.bottom > 0 ? 12 : MediaQuery.of(context).padding.bottom + 12,
+              bottom: MediaQuery.of(context).viewInsets.bottom > 0 
+                  ? 12 
+                  : MediaQuery.of(context).padding.bottom + 12,
             ),
             decoration: const BoxDecoration(
               color: AppTheme.background,
@@ -262,16 +280,22 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                     ),
                     onSubmitted: (_) => _send(),
+                    onChanged: (val) {
+                      // İleride typing event gönderilebilir
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
-                  child: Container(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
                     height: 48,
                     width: 48,
                     decoration: BoxDecoration(
-                      color: _isSending ? AppTheme.primary.withOpacity(0.5) : AppTheme.primary, 
+                      color: _isSending 
+                          ? AppTheme.primary.withOpacity(0.5) 
+                          : AppTheme.primary, 
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
