@@ -12,6 +12,11 @@ class AppConstants {
   static const int messagesPerPage = 50;
   static const int searchMinLength = 2;
 
+  // Eski kodla uyumluluk için alias (takma isim)
+  // Servis dosyasında "messageFetchLimit" ve "userSearchLimit" kullanılıyor.
+  static const int messageFetchLimit = messagesPerPage;
+  static const int userSearchLimit = 20;
+
   // --- TABLO İSİMLERİ (Yazım hatası olmaması için sabitledik) ---
   static const String tableProfiles = 'profiles';
   static const String tableConversations = 'conversations';
