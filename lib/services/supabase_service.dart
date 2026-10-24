@@ -23,11 +23,15 @@ class SupabaseService {
     );
   }
 
-  Future<AuthResponse> signUpWithEmail(String email, String password, String username) async {
+  Future<AuthResponse> signUpWithEmail(
+      String email, String password, String username) async {
     return await _client.auth.signUp(
       email: email.trim(),
       password: password,
-      data: {'username': username.trim(), 'full_name': username.trim()},
+      data: {
+        'username': username.trim(),
+        'full_name': username.trim(),
+      },
     );
   }
 
@@ -40,7 +44,6 @@ class SupabaseService {
   }
 
   Future<void> signOut() async {
-    // Aktif typing kanallarını temizle
     for (var channel in _typingChannels.values) {
       await channel.unsubscribe();
     }
@@ -58,7 +61,7 @@ class SupabaseService {
   }
 
   // ==========================================
-  // PROFİL & GİZLİLİK
+  // PROFİL
   // ==========================================
   Future<Profile?> getMyProfile() async {
     if (currentUser == null) return null;
@@ -92,10 +95,16 @@ class SupabaseService {
   }
 
   Future<void> updateProfile(String userId, Map<String, dynamic> updates) async {
-    await _client.from(AppConstants.tableProfiles).update(updates).eq('id', userId);
+    await _client
+        .from(AppConstants.tableProfiles)
+        .update(updates)
+        .eq('id', userId);
   }
 
-  Future<void> updatePrivacySettings({required bool showOnline, required bool showLastSeen}) async {
+  Future<void> updatePrivacySettings({
+    required bool showOnline,
+    required bool showLastSeen,
+  }) async {
     if (currentUser == null) return;
     await _client.from(AppConstants.tableProfiles).update({
       'show_online_status': showOnline,
@@ -133,7 +142,8 @@ class SupabaseService {
           .select('conversation_id')
           .eq('user_id', currentUser!.id);
 
-      final conversationIds = memberRows.map((e) => e['conversation_id']).toList();
+      final conversationIds =
+          memberRows.map((e) => e['conversation_id']).toList();
       if (conversationIds.isEmpty) return [];
 
       final List<Map<String, dynamic>> result = [];
@@ -141,7 +151,8 @@ class SupabaseService {
       for (var convId in conversationIds) {
         final otherMemberData = await _client
             .from(AppConstants.tableConversationMembers)
-            .select('user_id, profiles(id, username, full_name, avatar_url, status, show_online_status, show_last_seen)')
+            .select(
+                'user_id, profiles(id, username, full_name, avatar_url, status, show_online_status, show_last_seen)')
             .eq('conversation_id', convId)
             .neq('user_id', currentUser!.id)
             .limit(1)
@@ -156,7 +167,8 @@ class SupabaseService {
             .maybeSingle();
 
         int unreadCount = 0;
-        if (lastMsgData != null && lastMsgData['sender_id'] != currentUser!.id) {
+        if (lastMsgData != null &&
+            lastMsgData['sender_id'] != currentUser!.id) {
           final readData = await _client
               .from(AppConstants.tableMessageReads)
               .select('id')
@@ -260,7 +272,8 @@ class SupabaseService {
   // ==========================================
   // OKUNDU BİLGİSİ
   // ==========================================
-  Future<void> markMessageAsRead(String messageId, String conversationId) async {
+  Future<void> markMessageAsRead(
+      String messageId, String conversationId) async {
     if (currentUser == null) return;
     try {
       await _client.from(AppConstants.tableMessageReads).upsert({
@@ -288,18 +301,14 @@ class SupabaseService {
   }
 
   // ==========================================
-  // 🎯 TYPING INDICATOR (YAZIYOR GÖSTERGESİ)
+  // TYPING INDICATOR (YAZIYOR GÖSTERGESİ)
   // ==========================================
-
-  /// Typing kanalına abone olur. Karşı taraf yazarken callback tetiklenir.
-  /// Callback parametresi: yazan kullanıcının adı (String)
   RealtimeChannel subscribeToTyping(
     String conversationId,
     void Function(String username) onTyping,
   ) {
     final channelName = 'typing-$conversationId';
-    
-    // Önceden aynı kanal varsa kapat
+
     if (_typingChannels.containsKey(channelName)) {
       _typingChannels[channelName]?.unsubscribe();
       _typingChannels.remove(channelName);
@@ -310,7 +319,6 @@ class SupabaseService {
     channel.onBroadcast(
       event: 'typing',
       callback: (payload) {
-        // Kendi gönderdiğimiz typing event'ini görmezden gel
         if (payload['user_id'] != currentUser?.id) {
           onTyping(payload['username'] as String? ?? 'Biri');
         }
@@ -321,14 +329,12 @@ class SupabaseService {
     return channel;
   }
 
-  /// Typing event'i gönderir. (String 'broadcast' kullanımı - v2.5 uyumlu)
-  /// Bu, RealtimeChannelSendType hatasını çözer.
+  // ✅ DÜZELTME: 'broadcast' string yerine RealtimeListenTypes.broadcast enum
   Future<void> sendTypingEvent(String conversationId, String username) async {
     if (currentUser == null) return;
-    
+
     final channelName = 'typing-$conversationId';
-    
-    // Kanal yoksa oluştur
+
     if (!_typingChannels.containsKey(channelName)) {
       _typingChannels[channelName] = _client.channel(channelName);
       await _typingChannels[channelName]!.subscribe();
@@ -336,7 +342,7 @@ class SupabaseService {
 
     try {
       await _typingChannels[channelName]!.send(
-        type: 'broadcast',  // ✅ v2.5'te enum değil, string kullanılıyor
+        type: RealtimeListenTypes.broadcast, // ✅ Enum kullanımı
         event: 'typing',
         payload: {
           'user_id': currentUser!.id,
@@ -348,7 +354,6 @@ class SupabaseService {
     }
   }
 
-  /// Typing kanalını kapatır (sayfadan çıkınca çağırın)
   Future<void> unsubscribeTyping(String conversationId) async {
     final channelName = 'typing-$conversationId';
     final channel = _typingChannels.remove(channelName);
