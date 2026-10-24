@@ -5,7 +5,6 @@ import '../services/supabase_service.dart';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
-
   @override
   State<AuthPage> createState() => _AuthPageState();
 }
@@ -15,7 +14,6 @@ class _AuthPageState extends State<AuthPage> {
   final _passwordController = TextEditingController();
   final _usernameController = TextEditingController();
   final _service = SupabaseService();
-  
   bool _isLogin = true;
   bool _isLoading = false;
   String? _error;
@@ -26,14 +24,7 @@ class _AuthPageState extends State<AuthPage> {
       if (_isLogin) {
         await _service.signIn(_emailController.text.trim(), _passwordController.text);
       } else {
-        if (_usernameController.text.trim().isEmpty) {
-          throw 'Kullanıcı adı boş bırakılamaz';
-        }
-        await _service.signUp(
-          _emailController.text.trim(),
-          _passwordController.text,
-          _usernameController.text.trim(),
-        );
+        await _service.signUp(_emailController.text.trim(), _passwordController.text, _usernameController.text.trim());
       }
     } on AuthException catch (e) {
       setState(() => _error = e.message);
@@ -45,14 +36,6 @@ class _AuthPageState extends State<AuthPage> {
   }
 
   @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    _usernameController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
@@ -60,10 +43,10 @@ class _AuthPageState extends State<AuthPage> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.forum, size: 80, color: GetticTheme.accent),
-                const SizedBox(height: 16),
+                // GETTIC LOGOSU
+                Image.asset('assets/logo.png', width: 90, height: 90),
+                const SizedBox(height: 12),
                 const Text('Gettic', style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: GetticTheme.textPrimary)),
                 const SizedBox(height: 32),
                 
@@ -78,33 +61,20 @@ class _AuthPageState extends State<AuthPage> {
                     children: [
                       Row(
                         children: [
-                          Expanded(child: _buildTab('Giriş Yap', _isLogin, () => setState(() => _isLogin = true))),
+                          Expanded(child: _tab('Giriş Yap', _isLogin, () => setState(() => _isLogin = true))),
                           const SizedBox(width: 8),
-                          Expanded(child: _buildTab('Kayıt Ol', !_isLogin, () => setState(() => _isLogin = false))),
+                          Expanded(child: _tab('Kayıt Ol', !_isLogin, () => setState(() => _isLogin = false))),
                         ],
                       ),
                       const SizedBox(height: 24),
                       
                       if (!_isLogin) ...[
-                        TextField(
-                          controller: _usernameController,
-                          decoration: const InputDecoration(hintText: 'Kullanıcı Adı'),
-                        ),
+                        TextField(controller: _usernameController, decoration: const InputDecoration(hintText: 'Kullanıcı Adı')),
                         const SizedBox(height: 12),
                       ],
-                      
-                      TextField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: const InputDecoration(hintText: 'Email'),
-                      ),
+                      TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(hintText: 'Email')),
                       const SizedBox(height: 12),
-                      
-                      TextField(
-                        controller: _passwordController,
-                        obscureText: true,
-                        decoration: const InputDecoration(hintText: 'Şifre'),
-                      ),
+                      TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(hintText: 'Şifre')),
                       
                       if (_error != null) ...[
                         const SizedBox(height: 12),
@@ -117,14 +87,44 @@ class _AuthPageState extends State<AuthPage> {
                         height: 50,
                         child: ElevatedButton(
                           onPressed: _isLoading ? null : _submit,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: GetticTheme.accent,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
+                          style: ElevatedButton.styleFrom(backgroundColor: GetticTheme.accent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                           child: _isLoading
-                              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                              : Text(_isLogin ? 'Giriş Yap' : 'Kayıt Ol', style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
+                              ? const CircularProgressIndicator(color: Colors.white)
+                              : Text(_isLogin ? 'Giriş Yap' : 'Kayıt Ol', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ),
+                      ),
+                      
+                      const SizedBox(height: 20),
+                      const Text('veya', style: TextStyle(color: GetticTheme.textSecondary)),
+                      const SizedBox(height: 20),
+                      
+                      // SOSYAL MEDYA BUTONLARI
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _service.signInWithGoogle(),
+                              icon: const Icon(Icons.g_mobiledata, color: Colors.white, size: 30),
+                              label: const Text('Google', style: TextStyle(color: Colors.white)),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: GetticTheme.border),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _service.signInWithGithub(),
+                              icon: const Icon(Icons.code, color: Colors.white),
+                              label: const Text('GitHub', style: TextStyle(color: Colors.white)),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: GetticTheme.border),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -137,21 +137,13 @@ class _AuthPageState extends State<AuthPage> {
     );
   }
 
-  Widget _buildTab(String text, bool active, VoidCallback onTap) {
+  Widget _tab(String text, bool active, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: active ? GetticTheme.accent : GetticTheme.bgTertiary,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Center(
-          child: Text(text, style: TextStyle(
-            color: active ? Colors.white : GetticTheme.textSecondary,
-            fontWeight: FontWeight.w600,
-          )),
-        ),
+        decoration: BoxDecoration(color: active ? GetticTheme.accent : GetticTheme.bgTertiary, borderRadius: BorderRadius.circular(10)),
+        child: Center(child: Text(text, style: TextStyle(color: active ? Colors.white : GetticTheme.textSecondary, fontWeight: FontWeight.w600))),
       ),
     );
   }
