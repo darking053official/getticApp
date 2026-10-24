@@ -4,6 +4,8 @@ class Profile {
   final String? fullName;
   final String? avatarUrl;
   final String status;
+  final bool showOnlineStatus;
+  final bool showLastSeen;
 
   Profile({
     required this.id,
@@ -11,6 +13,8 @@ class Profile {
     this.fullName,
     this.avatarUrl,
     this.status = 'offline',
+    this.showOnlineStatus = true,
+    this.showLastSeen = true,
   });
 
   factory Profile.fromJson(Map<String, dynamic> json) {
@@ -20,6 +24,8 @@ class Profile {
       fullName: json['full_name'],
       avatarUrl: json['avatar_url'],
       status: json['status'] ?? 'offline',
+      showOnlineStatus: json['show_online_status'] ?? true,
+      showLastSeen: json['show_last_seen'] ?? true,
     );
   }
 }
