@@ -10,12 +10,7 @@ import '../services/supabase_service.dart';
 class ChatRoomPage extends StatefulWidget {
   final String conversationId;
   final Profile otherUser;
-
-  const ChatRoomPage({
-    super.key,
-    required this.conversationId,
-    required this.otherUser,
-  });
+  const ChatRoomPage({super.key, required this.conversationId, required this.otherUser});
 
   @override
   State<ChatRoomPage> createState() => _ChatRoomPageState();
@@ -28,68 +23,38 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   List<Message> _messages = [];
   late Stream<List<Message>> _messagesStream;
-
-  // TYPING INDICATOR
   RealtimeChannel? _typingChannel;
   Timer? _typingTimer;
-  Timer? _typingDebounce;
   bool _isOtherTyping = false;
-
   bool _isSending = false;
 
   @override
   void initState() {
     super.initState();
-
-    // Mesaj stream'i
     _messagesStream = _service.streamMessages(widget.conversationId);
     _messagesStream.listen((msgs) {
       if (mounted) {
         setState(() => _messages = msgs);
         _toBottom();
-        for (var m in msgs) {
-          if (m.senderId != _service.currentUser?.id) {
-            _service.markMessageAsRead(m.id, widget.conversationId);
-          }
-        }
       }
     });
 
-    // Typing dinleyicisi
-    _typingChannel = _service.subscribeToTyping(
-      widget.conversationId,
-      (username) {
-        if (mounted) {
-          setState(() => _isOtherTyping = true);
-          _typingTimer?.cancel();
-          _typingTimer = Timer(const Duration(seconds: 3), () {
-            if (mounted) setState(() => _isOtherTyping = false);
-          });
-        }
-      },
-    );
-  }
-
-  // Kullanıcı yazarken typing event gönder (debounce ile)
-  void _onTyping(String text) {
-    if (text.isEmpty) return;
-    _typingDebounce?.cancel();
-    _typingDebounce = Timer(const Duration(milliseconds: 500), () {
-      _service.sendTypingEvent(
-        widget.conversationId,
-        _service.currentUser?.email?.split('@').first ?? 'Kullanıcı',
-      );
+    _typingChannel = _service.subscribeToTyping(widget.conversationId, (username) {
+      if (mounted) {
+        setState(() => _isOtherTyping = true);
+        _typingTimer?.cancel();
+        _typingTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _isOtherTyping = false);
+        });
+      }
     });
   }
 
   void _toBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        _scroll.animateTo(_scroll.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
   }
@@ -103,13 +68,26 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     try {
       await _service.sendMessage(widget.conversationId, t);
-    } catch (e) {
+    } catch (e, st) {
+      print('MESAJ HATASI: $e');
+      print('STACK: $st');
+
       if (mounted) {
         _controller.text = t;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gönderilemedi: $e'),
-            backgroundColor: Colors.redAccent,
+        showDialog(
+          context: context,
+          builder: (c) => AlertDialog(
+            backgroundColor: AppTheme.surface,
+            title: const Text('Mesaj Gönderilemedi',
+                style: TextStyle(color: Colors.redAccent)),
+            content: Text('$e',
+                style: const TextStyle(color: AppTheme.textPrimary)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(c),
+                child: const Text('Tamam'),
+              ),
+            ],
           ),
         );
       }
@@ -121,7 +99,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   @override
   void dispose() {
     _typingTimer?.cancel();
-    _typingDebounce?.cancel();
     _service.unsubscribeTyping(widget.conversationId);
     _controller.dispose();
     _scroll.dispose();
@@ -134,11 +111,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     final timeFormat = DateFormat('HH:mm');
 
     return Scaffold(
-      resizeToAvoidBottomInset: true,
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         backgroundColor: AppTheme.surface,
-        elevation: 0,
         titleSpacing: 0,
         title: Row(
           children: [
@@ -149,11 +124,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 widget.otherUser.username.isNotEmpty
                     ? widget.otherUser.username[0].toUpperCase()
                     : '?',
-                style: const TextStyle(
-                  fontSize: 16,
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(width: 12),
@@ -161,25 +132,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    widget.otherUser.username,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                  // TYPING GÖSTERGESİ
+                  Text(widget.otherUser.username,
+                      style: const TextStyle(fontSize: 16, color: AppTheme.textPrimary)),
                   Text(
                     _isOtherTyping ? 'yazıyor...' : 'Çevrimiçi',
                     style: TextStyle(
                       fontSize: 12,
-                      color: _isOtherTyping
-                          ? AppTheme.primary
-                          : AppTheme.textSecondary,
-                      fontStyle: _isOtherTyping
-                          ? FontStyle.italic
-                          : FontStyle.normal,
+                      color: _isOtherTyping ? AppTheme.primary : AppTheme.textSecondary,
+                      fontStyle: _isOtherTyping ? FontStyle.italic : FontStyle.normal,
                     ),
                   ),
                 ],
@@ -193,99 +153,70 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           Expanded(
             child: _messages.isEmpty
                 ? const Center(
-                    child: Text(
-                      'İlk mesajı sen gönder!',
-                      style: TextStyle(color: AppTheme.textSecondary),
-                    ),
+                    child: Text('İlk mesajı sen gönder!',
+                        style: TextStyle(color: AppTheme.textSecondary)),
                   )
                 : ListView.builder(
                     controller: _scroll,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 20),
+                    padding: const EdgeInsets.all(16),
                     itemCount: _messages.length,
-                    itemBuilder: (context, index) {
-                      final msg = _messages[index];
-                      final isMine = msg.senderId == myId;
-
-                      final showTimestamp = index == 0 ||
-                          _messages[index - 1].senderId != msg.senderId ||
-                          msg.createdAt
-                                  .difference(
-                                      _messages[index - 1].createdAt)
-                                  .inMinutes >
-                              5;
-
-                      return Column(
-                        crossAxisAlignment: isMine
-                            ? CrossAxisAlignment.end
-                            : CrossAxisAlignment.start,
-                        children: [
-                          if (showTimestamp)
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                  top: 12, bottom: 6, left: 8, right: 8),
-                              child: Text(
-                                timeFormat.format(msg.createdAt),
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppTheme.textSecondary,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                    itemBuilder: (context, i) {
+                      final m = _messages[i];
+                      final mine = m.senderId == myId;
+                      return Align(
+                        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          constraints: BoxConstraints(
+                              maxWidth: MediaQuery.of(context).size.width * 0.78),
+                          decoration: BoxDecoration(
+                            color: mine ? AppTheme.primary : AppTheme.surface,
+                            borderRadius: BorderRadius.only(
+                              topLeft: const Radius.circular(16),
+                              topRight: const Radius.circular(16),
+                              bottomLeft: Radius.circular(mine ? 16 : 4),
+                              bottomRight: Radius.circular(mine ? 4 : 16),
                             ),
-                          Align(
-                            alignment: isMine
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 4),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 12),
-                              constraints: BoxConstraints(
-                                maxWidth:
-                                    MediaQuery.of(context).size.width * 0.78,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isMine
-                                    ? AppTheme.primary
-                                    : AppTheme.surface,
-                                borderRadius: BorderRadius.only(
-                                  topLeft: const Radius.circular(16),
-                                  topRight: const Radius.circular(16),
-                                  bottomLeft:
-                                      Radius.circular(isMine ? 16 : 4),
-                                  bottomRight:
-                                      Radius.circular(isMine ? 4 : 16),
-                                ),
-                                border: isMine
-                                    ? null
-                                    : Border.all(
-                                        color: AppTheme.inputBorder,
-                                        width: 1),
-                              ),
-                              // ✅ DÜZELTME: msg.content ?? '' (null safety)
-                              child: Text(
-                                msg.content ?? '',
-                                style: TextStyle(
-                                  color: isMine
-                                      ? Colors.white
-                                      : AppTheme.textPrimary,
-                                  fontSize: 15,
-                                  height: 1.3,
-                                ),
-                              ),
-                            ),
+                            border: mine ? null : Border.all(color: AppTheme.inputBorder),
                           ),
-                        ],
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                m.content ?? '',
+                                style: TextStyle(
+                                  color: mine ? Colors.white : AppTheme.textPrimary,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    timeFormat.format(m.createdAt),
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: mine ? Colors.white70 : AppTheme.textSecondary),
+                                  ),
+                                  if (mine) ...[
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.done_all,
+                                        size: 14, color: Color(0xFF60a5fa)),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       );
                     },
                   ),
           ),
           Container(
             padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 12,
+              left: 12, right: 12, top: 12,
               bottom: MediaQuery.of(context).viewInsets.bottom > 0
                   ? 12
                   : MediaQuery.of(context).padding.bottom + 12,
@@ -295,49 +226,32 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               border: Border(top: BorderSide(color: AppTheme.inputBorder)),
             ),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    textCapitalization: TextCapitalization.sentences,
-                    maxLines: 4,
-                    minLines: 1,
-                    style: const TextStyle(
-                        color: AppTheme.textPrimary, fontSize: 15),
+                    style: const TextStyle(color: AppTheme.textPrimary),
                     decoration: const InputDecoration(
                       hintText: 'Mesaj yaz...',
-                      contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 14),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     ),
-                    onChanged: _onTyping, // ✅ Typing tetikleyici
                     onSubmitted: (_) => _send(),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Container(
-                    height: 48,
-                    width: 48,
-                    decoration: BoxDecoration(
-                      color: _isSending
-                          ? AppTheme.primary.withOpacity(0.5)
-                          : AppTheme.primary,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: _isSending
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2),
-                            )
-                          : const Icon(Icons.send_rounded,
-                              color: Colors.white),
-                      onPressed: _isSending ? null : _send,
-                    ),
+                Container(
+                  decoration: BoxDecoration(
+                    color: _isSending ? AppTheme.primary.withOpacity(0.5) : AppTheme.primary,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: IconButton(
+                    icon: _isSending
+                        ? const SizedBox(
+                            width: 20, height: 20,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.send, color: Colors.white),
+                    onPressed: _isSending ? null : _send,
                   ),
                 ),
               ],
