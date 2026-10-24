@@ -1,150 +1,68 @@
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/profile.dart';
-import '../models/message.dart';
-import '../models/conversation.dart';
+import 'core/constants.dart';
+import 'core/theme.dart';
+import 'pages/auth_page.dart';
+import 'pages/chat_list_page.dart';
 
-class SupabaseService {
-  final SupabaseClient _client = Supabase.instance.client;
+void main() async {
+  // Flutter motorunu başlat
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Supabase bağlantısını başlat (Anahtarlar constants.dart'tan geliyor)
+  await Supabase.initialize(
+    url: AppConstants.supabaseUrl,
+    anonKey: AppConstants.supabaseAnonKey,
+  );
 
-  User? get currentUser => _client.auth.currentUser;
+  runApp(const GetticApp());
+}
 
-  // AUTH İŞLEMLERİ
-  Future<AuthResponse> signIn(String email, String password) async {
-    return await _client.auth.signInWithPassword(email: email, password: password);
-  }
+class GetticApp extends StatelessWidget {
+  const GetticApp({super.key});
 
-  Future<AuthResponse> signUp(String email, String password, String username) async {
-    return await _client.auth.signUp(
-      email: email,
-      password: password,
-      data: {'username': username, 'full_name': username},
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Gettic',
+      debugShowCheckedModeBanner: false, // Sağ üstteki DEBUG şeridini kaldırır
+      theme: GetticTheme.darkTheme,      // Premium Karanlık Temamız
+      home: const AuthWrapper(),         // Oturum kontrolünü yapan yapı
     );
   }
+}
 
-  Future<void> signOut() async {
-    await _client.auth.signOut();
-  }
+// Kullanıcının giriş yapıp yapmadığını kontrol eden yapı
+class AuthWrapper extends StatefulWidget {
+  const AuthWrapper({super.key});
 
-  // PROFİL İŞLEMLERİ
-  Future<Profile?> getMyProfile() async {
-    if (currentUser == null) return null;
-    try {
-      final data = await _client.from('profiles').select().eq('id', currentUser!.id).single();
-      return Profile.fromJson(data);
-    } catch (e) {
-      return null;
-    }
-  }
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
 
-  Future<List<Profile>> searchUsers(String query) async {
-    if (query.trim().length < 2) return [];
-    try {
-      final data = await _client
-          .from('profiles')
-          .select()
-          .ilike('username', '%${query.trim()}%')
-          .neq('id', currentUser!.id)
-          .limit(20);
-      return (data as List).map((e) => Profile.fromJson(e)).toList();
-    } catch (e) {
-      return [];
-    }
-  }
-
-  // SOHBET İŞLEMLERİ
-  Future<List<Conversation>> getMyConversations() async {
-    if (currentUser == null) return [];
-    try {
-      final data = await _client
-          .from('conversation_members')
-          .select('''
-            conversation_id,
-            conversations(
-              id, type, name, updated_at,
-              conversation_members(
-                user_id,
-                profiles(id, username, full_name, avatar_url, status)
-              )
-            )
-          ''')
-          .eq('user_id', currentUser!.id);
-
-      final list = (data as List).map((e) {
-        final conv = e['conversations'];
-        return Conversation.fromJson(conv, currentUserId: currentUser!.id);
-      }).toList();
-
-      // En son güncelleneni en üste al
-      list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-      return list;
-    } catch (e) {
-      return [];
-    }
-  }
-
-  Future<String> createOrGetDirectConversation(String otherUserId) async {
-    // Basitleştirilmiş sohbet oluşturma (Web projesindeki mantığın mobil karşılığı)
-    final myId = currentUser!.id;
+class _AuthWrapperState extends State<AuthWrapper> {
+  @override
+  void initState() {
+    super.initState();
     
-    // 1. Yeni sohbet oluştur
-    final newConv = await _client.from('conversations').insert({
-      'type': 'direct',
-      'created_by': myId,
-    }).select('id').single();
-    
-    final convId = newConv['id'];
-
-    // 2. Üyeleri ekle
-    await _client.from('conversation_members').insert([
-      {'conversation_id': convId, 'user_id': myId},
-      {'conversation_id': convId, 'user_id': otherUserId},
-    ]);
-
-    return convId;
-  }
-
-  // MESAJ İŞLEMLERİ
-  Future<List<Message>> getMessages(String conversationId) async {
-    try {
-      final data = await _client
-          .from('messages')
-          .select()
-          .eq('conversation_id', conversationId)
-          .order('created_at', ascending: true)
-          .limit(100);
-
-      return (data as List).map((e) => Message.fromJson(e)).toList();
-    } catch (e) {
-      return [];
-    }
-  }
-
-  Future<void> sendMessage(String conversationId, String content) async {
-    await _client.from('messages').insert({
-      'conversation_id': conversationId,
-      'sender_id': currentUser!.id,
-      'content': content,
-      'type': 'text',
+    // Supabase'de oturum durumu değiştiğinde (giriş/çıkış) ekranı yeniler
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final AuthChangeEvent event = data.event;
+      if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.signedOut) {
+        if (mounted) setState(() {});
+      }
     });
   }
 
-  // REALTIME
-  RealtimeChannel subscribeToMessages(String conversationId, Function(Message) onNewMessage) {
-    return _client
-        .channel('messages-$conversationId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'messages',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'conversation_id',
-            value: conversationId,
-          ),
-          callback: (payload) {
-            onNewMessage(Message.fromJson(payload.newRecord));
-          },
-        )
-        .subscribe();
+  @override
+  Widget build(BuildContext context) {
+    // Eğer aktif bir oturum varsa Sohbet Listesine, yoksa Giriş sayfasına yönlendir
+    final session = Supabase.instance.client.auth.currentSession;
+    
+    if (session == null) {
+      return const AuthPage();
+    } else {
+      return const ChatListPage();
+    }
   }
 }
