@@ -10,18 +10,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
-      - uses: subosito/flutter-action@v2
+          
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.0'
           channel: 'stable'
+      
+      - name: Create Android project structure
+        run: |
+          # Geçici bir Flutter projesi oluştur
+          flutter create --project-name gettic_mobile --org com.gettic temp_project
+          
+          # Android klasörünü kopyala
+          cp -r temp_project/android ./android
+          
+          # Diğer gerekli dosyaları kopyala
+          cp temp_project/.metadata ./
+          
+          # Geçici projeyi sil
+          rm -rf temp_project
+          
       - name: Get dependencies
         run: flutter pub get
+        
       - name: Build APK
         run: flutter build apk --release
+        
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
