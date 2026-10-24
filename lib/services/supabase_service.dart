@@ -329,7 +329,7 @@ class SupabaseService {
     return channel;
   }
 
-  // ✅ DÜZELTME: 'broadcast' string yerine RealtimeListenTypes.broadcast enum
+  // ✅ DÜZELTME: RealtimeListenTypes YOK. sendBroadcastMessage kullanılıyor.
   Future<void> sendTypingEvent(String conversationId, String username) async {
     if (currentUser == null) return;
 
@@ -341,8 +341,7 @@ class SupabaseService {
     }
 
     try {
-      await _typingChannels[channelName]!.send(
-        type: RealtimeListenTypes.broadcast, // ✅ Enum kullanımı
+      await _typingChannels[channelName]!.sendBroadcastMessage(
         event: 'typing',
         payload: {
           'user_id': currentUser!.id,
