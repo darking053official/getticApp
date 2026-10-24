@@ -1,1 +1,49 @@
+name: Build Gettic APK
 
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+          channel: 'stable'
+      
+      # Eksik android, ios, web klasörlerini oluşturur
+      - name: Ensure Flutter project structure
+        run: flutter create . --project-name gettic_mobile --org com.gettic
+      
+      # Paket adını gettic.by.darking053 olarak ayarlar
+      - name: Set Application ID
+        run: |
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i 's/applicationId ".*"/applicationId "gettic.by.darking053"/' android/app/build.gradle
+            sed -i 's/applicationId = ".*"/applicationId = "gettic.by.darking053"/' android/app/build.gradle.kts 2>/dev/null || true
+          fi
+      
+      - name: Get dependencies
+        run: flutter pub get
+      
+      - name: Build Release APK
+        run: flutter build apk --release
+      
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gettic-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
