@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';  // RealtimeChannel için
 import '../core/theme.dart';
 import '../models/message.dart';
 import '../models/profile.dart';
@@ -22,13 +23,21 @@ class _ChatPageState extends State<ChatPage> {
   
   List<Message> _messages = [];
   late Stream<List<Message>> _messagesStream;
+  
+  // TYPING INDICATOR DEĞİŞKENLERİ
+  RealtimeChannel? _typingChannel;
+  Timer? _typingTimer;
+  Timer? _typingDebounce;
+  bool _isOtherTyping = false;
+  
   bool _isSending = false;
 
   @override
   void initState() {
     super.initState();
+    
+    // 1. Mesaj stream'i
     _messagesStream = _service.streamMessages(widget.conversationId);
-
     _messagesStream.listen((msgs) {
       if (mounted) {
         setState(() => _messages = msgs);
@@ -40,15 +49,43 @@ class _ChatPageState extends State<ChatPage> {
         }
       }
     });
+
+    // 2. TYPING INDICATOR ABONELİĞİ
+    _typingChannel = _service.subscribeToTyping(
+      widget.conversationId,
+      (username) {
+        if (mounted) {
+          setState(() => _isOtherTyping = true);
+          // 3 saniye sonra otomatik kapat
+          _typingTimer?.cancel();
+          _typingTimer = Timer(const Duration(seconds: 3), () {
+            if (mounted) setState(() => _isOtherTyping = false);
+          });
+        }
+      },
+    );
+  }
+
+  // KULLANICI YAZARKEN TYPING EVENT GÖNDER (Debounce ile)
+  void _onTyping(String text) {
+    if (text.isEmpty) return;
+    
+    _typingDebounce?.cancel();
+    _typingDebounce = Timer(const Duration(milliseconds: 500), () {
+      _service.sendTypingEvent(
+        widget.conversationId, 
+        _service.currentUser?.email?.split('@').first ?? 'Kullanıcı'
+      );
+    });
   }
 
   void _toBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(
-          _scroll.position.maxScrollExtent, 
-          duration: const Duration(milliseconds: 300), 
-          curve: Curves.easeOut
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
         );
       }
     });
@@ -67,7 +104,7 @@ class _ChatPageState extends State<ChatPage> {
       if (mounted) {
         _controller.text = t;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gönderilemedi: $e'), backgroundColor: Colors.redAccent)
+          SnackBar(content: Text('Gönderilemedi: $e'), backgroundColor: Colors.redAccent),
         );
       }
     } finally {
@@ -77,8 +114,12 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
-    _controller.dispose(); 
-    _scroll.dispose(); 
+    // Temizlik
+    _typingTimer?.cancel();
+    _typingDebounce?.cancel();
+    _service.unsubscribeTyping(widget.conversationId);
+    _controller.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -95,19 +136,32 @@ class _ChatPageState extends State<ChatPage> {
         title: Row(
           children: [
             CircleAvatar(
-              backgroundColor: AppTheme.primary, 
-              radius: 16, 
+              backgroundColor: AppTheme.primary,
+              radius: 16,
               child: Text(
-                widget.otherUser.username.isNotEmpty 
-                    ? widget.otherUser.username[0].toUpperCase() 
-                    : '?', 
-                style: const TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)
-              )
+                widget.otherUser.username.isNotEmpty
+                    ? widget.otherUser.username[0].toUpperCase()
+                    : '?',
+                style: const TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold),
+              ),
             ),
             const SizedBox(width: 10),
-            Text(
-              widget.otherUser.username,
-              style: const TextStyle(fontSize: 16, color: AppTheme.textPrimary),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.otherUser.username,
+                    style: const TextStyle(fontSize: 16, color: AppTheme.textPrimary),
+                  ),
+                  // TYPING GÖSTERGESİ
+                  if (_isOtherTyping)
+                    const Text(
+                      'yazıyor...',
+                      style: TextStyle(fontSize: 12, color: AppTheme.primary, fontStyle: FontStyle.italic),
+                    ),
+                ],
+              ),
             ),
           ],
         ),
@@ -136,14 +190,14 @@ class _ChatPageState extends State<ChatPage> {
                           margin: const EdgeInsets.only(bottom: 8),
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width * 0.78
+                            maxWidth: MediaQuery.of(context).size.width * 0.78,
                           ),
                           decoration: BoxDecoration(
                             color: mine ? AppTheme.primary : AppTheme.surface,
                             borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(16), 
+                              topLeft: const Radius.circular(16),
                               topRight: const Radius.circular(16),
-                              bottomLeft: Radius.circular(mine ? 16 : 4), 
+                              bottomLeft: Radius.circular(mine ? 16 : 4),
                               bottomRight: Radius.circular(mine ? 4 : 16),
                             ),
                             border: mine ? null : Border.all(color: AppTheme.inputBorder, width: 1),
@@ -152,12 +206,12 @@ class _ChatPageState extends State<ChatPage> {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                m.content ?? '',  // ✅ Null safety fix
+                                m.content ?? '',
                                 style: TextStyle(
-                                  color: mine ? Colors.white : AppTheme.textPrimary, 
+                                  color: mine ? Colors.white : AppTheme.textPrimary,
                                   fontSize: 15,
                                   height: 1.3,
-                                )
+                                ),
                               ),
                               const SizedBox(height: 4),
                               Row(
@@ -166,18 +220,14 @@ class _ChatPageState extends State<ChatPage> {
                                   Text(
                                     timeFormat.format(m.createdAt),
                                     style: TextStyle(
-                                      fontSize: 10, 
-                                      color: mine ? Colors.white70 : AppTheme.textSecondary
+                                      fontSize: 10,
+                                      color: mine ? Colors.white70 : AppTheme.textSecondary,
                                     ),
                                   ),
                                   if (mine) ...[
                                     const SizedBox(width: 4),
-                                    const Icon(
-                                      Icons.done_all, 
-                                      size: 14, 
-                                      color: Color(0xFF60a5fa) 
-                                    ),
-                                  ]
+                                    const Icon(Icons.done_all, size: 14, color: Color(0xFF60a5fa)),
+                                  ],
                                 ],
                               ),
                             ],
@@ -190,43 +240,44 @@ class _ChatPageState extends State<ChatPage> {
           Container(
             padding: EdgeInsets.only(
               left: 12, right: 12, top: 12,
-              bottom: MediaQuery.of(context).viewInsets.bottom > 0 
-                  ? 12 
+              bottom: MediaQuery.of(context).viewInsets.bottom > 0
+                  ? 12
                   : MediaQuery.of(context).padding.bottom + 12,
             ),
             decoration: const BoxDecoration(
-              color: AppTheme.background, 
-              border: Border(top: BorderSide(color: AppTheme.inputBorder))
+              color: AppTheme.background,
+              border: Border(top: BorderSide(color: AppTheme.inputBorder)),
             ),
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
-                    controller: _controller, 
+                    controller: _controller,
                     textCapitalization: TextCapitalization.sentences,
                     style: const TextStyle(color: AppTheme.textPrimary),
                     decoration: const InputDecoration(
                       hintText: 'Mesaj yaz...',
                       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ), 
-                    onSubmitted: (_) => _send()
-                  )
+                    ),
+                    onChanged: _onTyping,   // TYPING EVENT
+                    onSubmitted: (_) => _send(),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Container(
                   decoration: BoxDecoration(
-                    color: _isSending ? AppTheme.primary.withOpacity(0.5) : AppTheme.primary, 
-                    borderRadius: BorderRadius.circular(12)
-                  ), 
+                    color: _isSending ? AppTheme.primary.withOpacity(0.5) : AppTheme.primary,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: IconButton(
-                    icon: _isSending 
+                    icon: _isSending
                         ? const SizedBox(
-                            width: 20, height: 20, 
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                            width: 20, height: 20,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                           )
-                        : const Icon(Icons.send, color: Colors.white), 
-                    onPressed: _isSending ? null : _send
-                  )
+                        : const Icon(Icons.send, color: Colors.white),
+                    onPressed: _isSending ? null : _send,
+                  ),
                 ),
               ],
             ),
