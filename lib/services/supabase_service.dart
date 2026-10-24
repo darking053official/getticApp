@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/constants.dart';
 import '../models/profile.dart';
 import '../models/message.dart';
 
 class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
+
+  // Typing kanallarını takip etmek için
+  final Map<String, RealtimeChannel> _typingChannels = {};
 
   User? get currentUser => _client.auth.currentUser;
   Stream<AuthState> get authStateChanges => _client.auth.onAuthStateChange;
@@ -12,17 +16,18 @@ class SupabaseService {
   // ==========================================
   // AUTH (KİMLİK DOĞRULAMA)
   // ==========================================
-  
-  // main.dart ve auth_page.dart ile uyumlu isimlendirme
   Future<AuthResponse> signInWithEmail(String email, String password) async {
-    return await _client.auth.signInWithPassword(email: email, password: password);
+    return await _client.auth.signInWithPassword(
+      email: email.trim(),
+      password: password,
+    );
   }
 
   Future<AuthResponse> signUpWithEmail(String email, String password, String username) async {
     return await _client.auth.signUp(
-      email: email,
+      email: email.trim(),
       password: password,
-      data: {'username': username, 'full_name': username},
+      data: {'username': username.trim(), 'full_name': username.trim()},
     );
   }
 
@@ -35,6 +40,11 @@ class SupabaseService {
   }
 
   Future<void> signOut() async {
+    // Aktif typing kanallarını temizle
+    for (var channel in _typingChannels.values) {
+      await channel.unsubscribe();
+    }
+    _typingChannels.clear();
     await _client.auth.signOut();
   }
 
@@ -42,7 +52,7 @@ class SupabaseService {
     try {
       await _client.rpc('delete_own_account');
     } catch (e) {
-      print('Hesap silme RPC hatası (RPC yoksa manuel silinecek): $e');
+      print('Hesap silme RPC hatası: $e');
     }
     await _client.auth.signOut();
   }
@@ -52,158 +62,208 @@ class SupabaseService {
   // ==========================================
   Future<Profile?> getMyProfile() async {
     if (currentUser == null) return null;
-    final data = await _client.from('profiles').select().eq('id', currentUser!.id).single();
-    return Profile.fromJson(data);
+    try {
+      final data = await _client
+          .from(AppConstants.tableProfiles)
+          .select()
+          .eq('id', currentUser!.id)
+          .maybeSingle();
+      if (data == null) return null;
+      return Profile.fromJson(data);
+    } catch (e) {
+      print('Profil yükleme hatası: $e');
+      return null;
+    }
   }
 
   Future<Profile?> getProfile(String userId) async {
-    final data = await _client.from('profiles').select().eq('id', userId).maybeSingle();
-    if (data == null) return null;
-    return Profile.fromJson(data);
+    try {
+      final data = await _client
+          .from(AppConstants.tableProfiles)
+          .select()
+          .eq('id', userId)
+          .maybeSingle();
+      if (data == null) return null;
+      return Profile.fromJson(data);
+    } catch (e) {
+      print('Kullanıcı profili yükleme hatası: $e');
+      return null;
+    }
   }
 
   Future<void> updateProfile(String userId, Map<String, dynamic> updates) async {
-    await _client.from('profiles').update(updates).eq('id', userId);
+    await _client.from(AppConstants.tableProfiles).update(updates).eq('id', userId);
   }
 
   Future<void> updatePrivacySettings({required bool showOnline, required bool showLastSeen}) async {
     if (currentUser == null) return;
-    await _client.from('profiles').update({
+    await _client.from(AppConstants.tableProfiles).update({
       'show_online_status': showOnline,
       'show_last_seen': showLastSeen,
     }).eq('id', currentUser!.id);
   }
 
   Future<List<Profile>> searchUsers(String query) async {
-    if (query.trim().length < 2) return [];
-    final data = await _client.from('profiles').select()
-        .ilike('username', '%${query.trim()}%')
-        .neq('id', currentUser!.id)
-        .limit(20);
-    return (data as List).map((e) => Profile.fromJson(e)).toList();
+    if (currentUser == null) return [];
+    if (query.trim().length < AppConstants.searchMinLength) return [];
+
+    try {
+      final data = await _client
+          .from(AppConstants.tableProfiles)
+          .select()
+          .ilike('username', '%${query.trim()}%')
+          .neq('id', currentUser!.id)
+          .limit(AppConstants.userSearchLimit);
+      return (data as List).map((e) => Profile.fromJson(e)).toList();
+    } catch (e) {
+      print('Kullanıcı arama hatası: $e');
+      return [];
+    }
   }
 
   // ==========================================
-  // SOHBETLER (CONVERSATIONS)
+  // SOHBETLER
   // ==========================================
-  
-  // chat_list_page.dart'ın beklediği fonksiyon.
-  // Sizin detaylı join yapınızı kullanıp, sayfanın anlayacağı formata çeviriyor.
   Future<List<Map<String, dynamic>>> getMyConversationsWithUnread() async {
     if (currentUser == null) return [];
-    
+
     try {
-      // Sizin yazdığınız detaylı join sorgusu
-      final data = await _client.from('conversation_members').select('''
-        conversation_id,
-        conversations(
-          id, type, name, updated_at,
-          conversation_members(
-            user_id,
-            profiles(id, username, full_name, avatar_url, status, show_online_status)
-          )
-        )
-      ''').eq('user_id', currentUser!.id);
+      final memberRows = await _client
+          .from(AppConstants.tableConversationMembers)
+          .select('conversation_id')
+          .eq('user_id', currentUser!.id);
+
+      final conversationIds = memberRows.map((e) => e['conversation_id']).toList();
+      if (conversationIds.isEmpty) return [];
 
       final List<Map<String, dynamic>> result = [];
 
-      for (var row in data) {
-        final conv = row['conversations'];
-        if (conv == null) continue;
+      for (var convId in conversationIds) {
+        final otherMemberData = await _client
+            .from(AppConstants.tableConversationMembers)
+            .select('user_id, profiles(id, username, full_name, avatar_url, status, show_online_status, show_last_seen)')
+            .eq('conversation_id', convId)
+            .neq('user_id', currentUser!.id)
+            .limit(1)
+            .maybeSingle();
 
-        // Karşı tarafı bul
-        final members = conv['conversation_members'] as List;
-        Map<String, dynamic>? otherUser;
-        
-        for (var m in members) {
-          if (m['user_id'] != currentUser!.id) {
-            otherUser = m['profiles'];
-            break;
-          }
-        }
-
-        // Son mesajı al
         final lastMsgData = await _client
-            .from('messages')
-            .select('content, created_at, sender_id')
-            .eq('conversation_id', conv['id'])
+            .from(AppConstants.tableMessages)
+            .select('content, created_at, sender_id, type')
+            .eq('conversation_id', convId)
             .order('created_at', ascending: false)
             .limit(1)
             .maybeSingle();
 
-        // Okunmamış sayısını al (Şimdilik basit bir hesaplama, geliştirilebilir)
         int unreadCount = 0;
         if (lastMsgData != null && lastMsgData['sender_id'] != currentUser!.id) {
-           // Gerçek okunmamış sayısı için message_reads tablosuyla join yapılmalı
-           unreadCount = 1; 
+          final readData = await _client
+              .from(AppConstants.tableMessageReads)
+              .select('id')
+              .eq('conversation_id', convId)
+              .eq('user_id', currentUser!.id)
+              .maybeSingle();
+          if (readData == null) unreadCount = 1;
         }
 
         result.add({
-          'conversation_id': conv['id'],
-          'other_user': otherUser,
+          'conversation_id': convId,
+          'other_user': otherMemberData?['profiles'],
           'last_message': lastMsgData,
           'unread_count': unreadCount,
         });
       }
 
-      // Son mesaj tarihine göre sırala (En yeni en üstte)
       result.sort((a, b) {
         final aDate = a['last_message']?['created_at'] ?? '2000-01-01';
         final bDate = b['last_message']?['created_at'] ?? '2000-01-01';
-        return bDate.compareTo(aDate);
+        return bDate.toString().compareTo(aDate.toString());
       });
 
       return result;
     } catch (e) {
-      print("Sohbetleri çekme hatası: $e");
+      print('Sohbetleri çekme hatası: $e');
       return [];
     }
   }
 
   Future<String> createConversation(String otherUserId) async {
-    final myId = currentUser!.id;
-    final newConv = await _client.from('conversations').insert({
-      'type': 'direct', 
-      'created_by': myId
-    }).select('id').single();
-    
-    final convId = newConv['id'];
-    
-    await _client.from('conversation_members').insert([
-      {'conversation_id': convId, 'user_id': myId},
+    if (currentUser == null) throw Exception('Kullanıcı giriş yapmamış');
+
+    final convResponse = await _client
+        .from(AppConstants.tableConversations)
+        .insert({'type': 'direct', 'created_by': currentUser!.id})
+        .select('id')
+        .single();
+
+    final convId = convResponse['id'];
+
+    await _client.from(AppConstants.tableConversationMembers).insert([
+      {'conversation_id': convId, 'user_id': currentUser!.id},
       {'conversation_id': convId, 'user_id': otherUserId},
     ]);
-    
+
     return convId;
   }
 
   // ==========================================
-  // MESAJLAR (MESSAGES)
+  // MESAJLAR
   // ==========================================
   Future<List<Message>> getMessages(String conversationId) async {
-    final data = await _client.from('messages').select()
+    try {
+      final data = await _client
+          .from(AppConstants.tableMessages)
+          .select()
+          .eq('conversation_id', conversationId)
+          .order('created_at', ascending: false)
+          .limit(AppConstants.messageFetchLimit);
+      final list = (data as List).map((e) => Message.fromJson(e)).toList();
+      return list.reversed.toList();
+    } catch (e) {
+      print('Mesajları çekme hatası: $e');
+      return [];
+    }
+  }
+
+  Stream<List<Message>> streamMessages(String conversationId) {
+    return _client
+        .from(AppConstants.tableMessages)
+        .stream(primaryKey: ['id'])
         .eq('conversation_id', conversationId)
         .order('created_at', ascending: true)
-        .limit(100);
-    return (data as List).map((e) => Message.fromJson(e)).toList();
+        .map((data) => data.map((json) => Message.fromJson(json)).toList());
   }
 
   Future<void> sendMessage(String conversationId, String content) async {
-    await _client.from('messages').insert({
+    if (currentUser == null) throw Exception('Giriş yapmalısınız');
+    if (content.trim().isEmpty) throw Exception('Boş mesaj gönderilemez');
+    if (content.length > AppConstants.messageMaxLength) {
+      throw Exception('Mesaj çok uzun');
+    }
+
+    await _client.from(AppConstants.tableMessages).insert({
       'conversation_id': conversationId,
       'sender_id': currentUser!.id,
-      'content': content,
+      'content': content.trim(),
       'type': 'text',
     });
+
+    try {
+      await _client.from(AppConstants.tableConversations).update({
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', conversationId);
+    } catch (e) {
+      print('Sohbet güncelleme hatası: $e');
+    }
   }
 
   // ==========================================
-  // OKUNDU BİLGİSİ (READ RECEIPTS)
+  // OKUNDU BİLGİSİ
   // ==========================================
   Future<void> markMessageAsRead(String messageId, String conversationId) async {
     if (currentUser == null) return;
     try {
-      await _client.from('message_reads').upsert({
+      await _client.from(AppConstants.tableMessageReads).upsert({
         'message_id': messageId,
         'conversation_id': conversationId,
         'user_id': currentUser!.id,
@@ -216,7 +276,8 @@ class SupabaseService {
 
   Future<bool> isMessageRead(String messageId) async {
     try {
-      final data = await _client.from('message_reads')
+      final data = await _client
+          .from(AppConstants.tableMessageReads)
           .select('id')
           .eq('message_id', messageId)
           .maybeSingle();
@@ -227,44 +288,72 @@ class SupabaseService {
   }
 
   // ==========================================
-  // YAZIYOR GÖSTERGESİ (TYPING INDICATOR)
+  // 🎯 TYPING INDICATOR (YAZIYOR GÖSTERGESİ)
   // ==========================================
-  
-  // Supabase v2 uyumlu Broadcast yapısı
-  RealtimeChannel subscribeToTyping(String conversationId, Function(String) onTyping) {
-    return _client.channel('typing-$conversationId')
-        .onBroadcast(
-          event: 'typing',
-          callback: (payload) {
-            if (payload['user_id'] != currentUser?.id) {
-              onTyping(payload['username'] ?? 'Biri');
-            }
-          },
-        ).subscribe();
+
+  /// Typing kanalına abone olur. Karşı taraf yazarken callback tetiklenir.
+  /// Callback parametresi: yazan kullanıcının adı (String)
+  RealtimeChannel subscribeToTyping(
+    String conversationId,
+    void Function(String username) onTyping,
+  ) {
+    final channelName = 'typing-$conversationId';
+    
+    // Önceden aynı kanal varsa kapat
+    if (_typingChannels.containsKey(channelName)) {
+      _typingChannels[channelName]?.unsubscribe();
+      _typingChannels.remove(channelName);
+    }
+
+    final channel = _client.channel(channelName);
+
+    channel.onBroadcast(
+      event: 'typing',
+      callback: (payload) {
+        // Kendi gönderdiğimiz typing event'ini görmezden gel
+        if (payload['user_id'] != currentUser?.id) {
+          onTyping(payload['username'] as String? ?? 'Biri');
+        }
+      },
+    ).subscribe();
+
+    _typingChannels[channelName] = channel;
+    return channel;
   }
 
+  /// Typing event'i gönderir. (String 'broadcast' kullanımı - v2.5 uyumlu)
+  /// Bu, RealtimeChannelSendType hatasını çözer.
   Future<void> sendTypingEvent(String conversationId, String username) async {
     if (currentUser == null) return;
-    // BroadcastEventType yerine doğrudan 'broadcast' string'i kullanılıyor
-    await _client.channel('typing-$conversationId').send(
-      type: RealtimeChannelSendType.broadcast, 
-      event: 'typing',
-      payload: {'user_id': currentUser!.id, 'username': username},
-    );
+    
+    final channelName = 'typing-$conversationId';
+    
+    // Kanal yoksa oluştur
+    if (!_typingChannels.containsKey(channelName)) {
+      _typingChannels[channelName] = _client.channel(channelName);
+      await _typingChannels[channelName]!.subscribe();
+    }
+
+    try {
+      await _typingChannels[channelName]!.send(
+        type: 'broadcast',  // ✅ v2.5'te enum değil, string kullanılıyor
+        event: 'typing',
+        payload: {
+          'user_id': currentUser!.id,
+          'username': username,
+        },
+      );
+    } catch (e) {
+      print('Typing event gönderme hatası: $e');
+    }
   }
 
-  // ==========================================
-  // REALTIME (ANLIK MESAJ DİNLEME)
-  // ==========================================
-  
-  // chat_room_page.dart'ın beklediği Stream yapısı. 
-  // Sizin detaylı PostgresChanges yapınızın daha modern ve Riverpod uyumlu hali.
-  Stream<List<Message>> streamMessages(String conversationId) {
-    return _client
-        .from('messages')
-        .stream(primaryKey: ['id'])
-        .eq('conversation_id', conversationId)
-        .order('created_at', ascending: true)
-        .map((data) => data.map((json) => Message.fromJson(json)).toList());
+  /// Typing kanalını kapatır (sayfadan çıkınca çağırın)
+  Future<void> unsubscribeTyping(String conversationId) async {
+    final channelName = 'typing-$conversationId';
+    final channel = _typingChannels.remove(channelName);
+    if (channel != null) {
+      await channel.unsubscribe();
+    }
   }
 }
