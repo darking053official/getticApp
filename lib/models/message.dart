@@ -18,16 +18,17 @@ class Message {
   });
 
   // Supabase'den gelen JSON verisini modele çevirir
+  // Null safety için her alana varsayılan değer eklenmiştir.
   factory Message.fromJson(Map<String, dynamic> json) {
     return Message(
-      id: json['id'],
-      conversationId: json['conversation_id'],
-      senderId: json['sender_id'],
-      content: json['content'],
-      type: json['type'] ?? 'text',
-      mediaUrl: json['media_url'],
+      id: json['id']?.toString() ?? '',
+      conversationId: json['conversation_id']?.toString() ?? '',
+      senderId: json['sender_id']?.toString() ?? '',
+      content: json['content'] as String?,
+      type: (json['type'] as String?) ?? 'text',
+      mediaUrl: json['media_url'] as String?,
       createdAt: json['created_at'] != null 
-          ? DateTime.parse(json['created_at']) 
+          ? (DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now())
           : DateTime.now(),
     );
   }
@@ -41,5 +42,26 @@ class Message {
       'type': type,
       'media_url': mediaUrl,
     };
+  }
+
+  // Kopyalama metodu (Optimistic UI için gerektiğinde kullanılır)
+  Message copyWith({
+    String? id,
+    String? conversationId,
+    String? senderId,
+    String? content,
+    String? type,
+    String? mediaUrl,
+    DateTime? createdAt,
+  }) {
+    return Message(
+      id: id ?? this.id,
+      conversationId: conversationId ?? this.conversationId,
+      senderId: senderId ?? this.senderId,
+      content: content ?? this.content,
+      type: type ?? this.type,
+      mediaUrl: mediaUrl ?? this.mediaUrl,
+      createdAt: createdAt ?? this.createdAt,
+    );
   }
 }
