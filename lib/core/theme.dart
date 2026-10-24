@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-class GetticTheme {
+class AppTheme {
   static const Color bgPrimary = Color(0xFF0a0a0f);
   static const Color bgSecondary = Color(0xFF12121a);
   static const Color bgTertiary = Color(0xFF1a1a24);
