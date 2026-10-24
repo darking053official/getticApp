@@ -7,7 +7,9 @@ class SupabaseService {
 
   User? get currentUser => _client.auth.currentUser;
 
-  // AUTH & OAUTH
+  // ==========================================
+  // AUTH (KİMLİK DOĞRULAMA)
+  // ==========================================
   Future<AuthResponse> signIn(String email, String password) async {
     return await _client.auth.signInWithPassword(email: email, password: password);
   }
@@ -32,13 +34,14 @@ class SupabaseService {
     await _client.auth.signOut();
   }
 
-  // HESAP SİLME
   Future<void> deleteAccount() async {
     await _client.rpc('delete_own_account');
     await _client.auth.signOut();
   }
 
+  // ==========================================
   // PROFİL & GİZLİLİK
+  // ==========================================
   Future<Profile?> getMyProfile() async {
     if (currentUser == null) return null;
     final data = await _client.from('profiles').select().eq('id', currentUser!.id).single();
@@ -62,8 +65,10 @@ class SupabaseService {
     return (data as List).map((e) => Profile.fromJson(e)).toList();
   }
 
-  // SOHBET & MESAJLAR (Okunmamış sayacı dahil)
-  Future<List<Map<String, dynamic>>> getMyConversationsWithUnread() async {
+  // ==========================================
+  // SOHBETLER (CONVERSATIONS)
+  // ==========================================
+  Future<List<Map<String, dynamic>>> getMyConversations() async {
     if (currentUser == null) return [];
     
     final data = await _client.from('conversation_members').select('''
@@ -91,6 +96,9 @@ class SupabaseService {
     return convId;
   }
 
+  // ==========================================
+  // MESAJLAR (MESSAGES)
+  // ==========================================
   Future<List<Message>> getMessages(String conversationId) async {
     final data = await _client.from('messages').select()
         .eq('conversation_id', conversationId)
@@ -108,6 +116,62 @@ class SupabaseService {
     });
   }
 
+  // ==========================================
+  // OKUNDU BİLGİSİ (READ RECEIPTS)
+  // ==========================================
+  Future<void> markMessageAsRead(String messageId, String conversationId) async {
+    if (currentUser == null) return;
+    try {
+      await _client.from('message_reads').upsert({
+        'message_id': messageId,
+        'conversation_id': conversationId,
+        'user_id': currentUser!.id,
+        'read_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('Okundu işaretleme hatası: $e');
+    }
+  }
+
+  Future<bool> isMessageRead(String messageId) async {
+    try {
+      final data = await _client.from('message_reads')
+          .select('id')
+          .eq('message_id', messageId)
+          .maybeSingle();
+      return data != null;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ==========================================
+  // YAZIYOR GÖSTERGESİ (TYPING INDICATOR)
+  // ==========================================
+  RealtimeChannel subscribeToTyping(String conversationId, Function(String) onTyping) {
+    return _client.channel('typing-$conversationId')
+        .onBroadcast(
+          event: 'typing',
+          callback: (payload) {
+            if (payload['user_id'] != currentUser?.id) {
+              onTyping(payload['username'] ?? 'Biri');
+            }
+          },
+        ).subscribe();
+  }
+
+  Future<void> sendTypingEvent(String conversationId, String username) async {
+    if (currentUser == null) return;
+    await _client.channel('typing-$conversationId').send(
+      type: BroadcastEventType.broadcast,
+      event: 'typing',
+      payload: {'user_id': currentUser!.id, 'username': username},
+    );
+  }
+
+  // ==========================================
+  // REALTIME (ANLIK MESAJ DİNLEME)
+  // ==========================================
   RealtimeChannel subscribeToMessages(String conversationId, Function(Message) onNewMessage) {
     return _client.channel('messages-$conversationId')
         .onPostgresChanges(
