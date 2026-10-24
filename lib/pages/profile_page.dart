@@ -32,21 +32,23 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Future<void> _loadProfile() async {
-    final userId = _service.currentUser?.id;
-    if (userId == null) return;
-
     try {
-      final data = await _service.getProfile(userId);
-      if (data != null) {
-        final profile = Profile.fromJson(data);
-        setState(() {
-          _profile = profile;
-          _usernameController.text = profile.username;
-          _statusController.text = profile.status ?? '';
-          _showOnlineStatus = profile.showOnlineStatus;
-          _showLastSeen = profile.showLastSeen;
-          _isLoading = false;
-        });
+      // ✅ getProfile zaten Profile nesnesi döndürüyor
+      final profile = await _service.getMyProfile();
+      
+      if (mounted) {
+        if (profile != null) {
+          setState(() {
+            _profile = profile;
+            _usernameController.text = profile.username;
+            _statusController.text = profile.status ?? '';
+            _showOnlineStatus = profile.showOnlineStatus;
+            _showLastSeen = profile.showLastSeen;
+            _isLoading = false;
+          });
+        } else {
+          setState(() => _isLoading = false);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -102,22 +104,23 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
   }
 
-  // Gizlilik switch'leri değiştiğinde anında veritabanına yaz (İsteğe bağlı UX)
+  // Gizlilik switch'leri değiştiğinde anında veritabanına yaz
   Future<void> _togglePrivacy(String field, bool value) async {
     setState(() {
-      if (field == 'online') _showOnlineStatus = value;
-      if (field == 'last_seen') _showLastSeen = value;
+      if (field == 'show_online_status') _showOnlineStatus = value;
+      if (field == 'show_last_seen') _showLastSeen = value;
     });
 
     final userId = _service.currentUser?.id;
     if (userId != null) {
       try {
+        // ✅ Servis fonksiyonumuzla uyumlu hale getirildi
         await _service.updateProfile(userId, {field: value});
       } catch (e) {
         // Hata durumunda eski haline getir
         setState(() {
-          if (field == 'online') _showOnlineStatus = !value;
-          if (field == 'last_seen') _showLastSeen = !value;
+          if (field == 'show_online_status') _showOnlineStatus = !value;
+          if (field == 'show_last_seen') _showLastSeen = !value;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Gizlilik ayarı kaydedilemedi.')),
@@ -165,7 +168,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       : null,
                   child: _profile?.avatarUrl == null
                       ? Text(
-                          _profile!.username.isNotEmpty
+                          (_profile?.username.isNotEmpty ?? false)
                               ? _profile!.username[0].toUpperCase()
                               : '?',
                           style: const TextStyle(
@@ -200,9 +203,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             ),
             const SizedBox(height: 16),
             
+            // ✅ Email yerine username gösteriliyor (profiles tablosunda email yok)
             Text(
-              _profile?.email ?? 'E-posta yok',
-              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              '@${_profile?.username ?? "kullanici"}',
+              style: const TextStyle(
+                color: AppTheme.textSecondary, 
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
             ),
             const SizedBox(height: 32),
 
@@ -228,6 +236,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   const SizedBox(height: 16),
                   TextField(
                     controller: _usernameController,
+                    style: const TextStyle(color: AppTheme.textPrimary),
                     decoration: const InputDecoration(
                       labelText: 'Kullanıcı Adı',
                       labelStyle: TextStyle(color: AppTheme.textSecondary),
@@ -237,6 +246,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _statusController,
+                    style: const TextStyle(color: AppTheme.textPrimary),
                     decoration: const InputDecoration(
                       labelText: 'Durum (İsteğe bağlı)',
                       hintText: 'Örn: Kod yazıyorum...',
@@ -281,7 +291,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     ),
                     activeColor: AppTheme.primary,
                     value: _showOnlineStatus,
-                    onChanged: (val) => _togglePrivacy('online', val),
+                    onChanged: (val) => _togglePrivacy('show_online_status', val),
                   ),
                   const Divider(color: AppTheme.inputBorder),
                   SwitchListTile(
@@ -296,7 +306,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     ),
                     activeColor: AppTheme.primary,
                     value: _showLastSeen,
-                    onChanged: (val) => _togglePrivacy('last_seen', val),
+                    onChanged: (val) => _togglePrivacy('show_last_seen', val),
                   ),
                 ],
               ),
