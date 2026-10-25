@@ -158,18 +158,21 @@ jobs:
         run: dart run flutter_launcher_icons
         continue-on-error: true
       
-      # ✅ DÜZELTME: Flutter'ı Visual Studio 2022 kullanmaya zorla
+      # ✅ KESİN ÇÖZÜM: Flutter'ın build_windows.dart dosyasını VS2022 için yamala
       - name: Patch Flutter for Visual Studio 2022
         run: |
           $flutterPath = (Get-Command flutter).Source | Split-Path | Split-Path
           $buildFile = "$flutterPath\packages\flutter_tools\lib\src\windows\build_windows.dart"
           if (Test-Path $buildFile) {
-            (Get-Content $buildFile) -replace "Visual Studio 16 2019", "Visual Studio 17 2022" | Set-Content $buildFile
-            Write-Host "✅ Flutter build_windows.dart yaması uygulandı"
+            # Visual Studio 16 2019 -> Visual Studio 17 2022
+            (Get-Content $buildFile) -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022' | Set-Content $buildFile
+            Write-Host "✅ build_windows.dart yaması uygulandı"
+            Select-String -Path $buildFile -Pattern "Visual Studio 17 2022"
           }
-          # Flutter tool cache'ini temizle (yeniden oluşturulsun)
+          # Flutter tool önbelleğini temizle (yeniden derlensin)
           Remove-Item -Path "$flutterPath\bin\cache\flutter_tools.stamp" -ErrorAction SilentlyContinue
           Remove-Item -Path "$flutterPath\bin\cache\flutter_tools.snapshot" -ErrorAction SilentlyContinue
+          Write-Host "✅ Flutter tool önbelleği temizlendi"
       
       - name: Build Windows
         run: |
@@ -281,15 +284,17 @@ jobs:
         run: dart run flutter_launcher_icons
         continue-on-error: true
       
-      # ✅ DÜZELTME: -Werror'ı devre dışı bırak (uyarılar build'i durdurmasın)
+      # ✅ KESİN ÇÖZÜM: CMakeLists.txt'deki -Werror'ı devre dışı bırak
       - name: Disable -Werror for Linux Build
         run: |
           CMAKE_FILE="linux/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
-            # APPLY_STANDARD_SETTINGS fonksiyonuna -Wno-error ekle
+            # APPLY_STANDARD_SETTINGS fonksiyonundaki -Werror'ı -Wno-error yap
             sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
+            # flutter_secure_storage için deprecated uyarılarını kapat
+            sed -i 's/-Wno-error/-Wno-error -Wno-deprecated-declarations -Wno-deprecated-literal-operator/' "$CMAKE_FILE"
             echo "✅ -Werror devre dışı bırakıldı"
-            grep "target_compile_options" "$CMAKE_FILE" | head -3
+            grep "target_compile_options" "$CMAKE_FILE" | head -5
           fi
       
       - name: Build Linux
