@@ -125,7 +125,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # WINDOWS BUILD (ÇİFT YAMALAMA)
+  # WINDOWS BUILD (ATL + VS2022)
   # ==========================================
   build-windows:
     name: Build Windows EXE
@@ -158,34 +158,37 @@ jobs:
         run: dart run flutter_launcher_icons
         continue-on-error: true
       
-      # ✅ ÇİFT YAMALAMA: Hem build_windows.dart hem visual_studio.dart
       - name: Patch Flutter for Visual Studio 2022
         run: |
           $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
-          
-          # 1. build_windows.dart yamala
           $buildFile = Join-Path $flutterRoot "packages\flutter_tools\lib\src\windows\build_windows.dart"
           if (Test-Path $buildFile) {
             $content = Get-Content $buildFile -Raw
             $content = $content -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022'
             Set-Content -Path $buildFile -Value $content -NoNewline
-            Write-Host "✅ build_windows.dart güncellendi"
           }
-          
-          # 2. visual_studio.dart yamala (VS kurulum kontrolü için)
           $vsFile = Join-Path $flutterRoot "packages\flutter_tools\lib\src\windows\visual_studio.dart"
           if (Test-Path $vsFile) {
             $content = Get-Content $vsFile -Raw
             $content = $content -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022'
             Set-Content -Path $vsFile -Value $content -NoNewline
-            Write-Host "✅ visual_studio.dart güncellendi"
           }
-          
-          # 3. Flutter tool önbelleğini temizle
           $cacheDir = Join-Path $flutterRoot "bin\cache"
           Remove-Item -Path (Join-Path $cacheDir "flutter_tools.stamp") -ErrorAction SilentlyContinue
           Remove-Item -Path (Join-Path $cacheDir "flutter_tools.snapshot") -ErrorAction SilentlyContinue
-          Write-Host "✅ Flutter tool önbelleği temizlendi"
+      
+      # ✅ ATL bileşenini kur (flutter_secure_storage_windows için zorunlu)
+      - name: Install Visual Studio ATL Component
+        run: |
+          $vsPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+          if (-not (Test-Path $vsPath)) { $vsPath = "C:\Program Files\Microsoft Visual Studio\2022\Community" }
+          if (-not (Test-Path $vsPath)) { $vsPath = "C:\Program Files\Microsoft Visual Studio\2022\BuildTools" }
+          if (Test-Path $vsPath) {
+            $installer = "$vsPath\Common7\IDE\vs_installer.exe"
+            if (Test-Path $installer) {
+              Start-Process -FilePath $installer -ArgumentList "modify --installPath `"$vsPath`" --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart" -Wait
+            }
+          }
       
       - name: Build Windows
         run: |
@@ -257,7 +260,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # LINUX BUILD (CMake Dosyalarını Yamala)
+  # LINUX BUILD (BOŞ PAKET YÖNTEMİ)
   # ==========================================
   build-linux:
     name: Build Linux (AppImage + deb)
@@ -273,6 +276,37 @@ jobs:
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
           sudo apt-get install -y fuse libfuse2
           sudo apt-get install -y libsecret-1-dev libjsoncpp-dev
+      
+      # ✅ BOŞ PAKET OLUŞTUR (file_selector_linux yerine)
+      - name: Create Fake file_selector_linux Package
+        run: |
+          mkdir -p fake_file_selector_linux/lib
+          
+          cat > fake_file_selector_linux/pubspec.yaml << 'EOF'
+          name: file_selector_linux
+          description: Fake empty package to bypass build errors
+          version: 0.9.3+2
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+            flutter: '>=3.0.0'
+          dependencies:
+            flutter:
+              sdk: flutter
+          flutter:
+            plugin:
+              implements: file_selector_linux
+              platforms:
+                linux:
+                  dartPluginClass: FileSelectorLinux
+          EOF
+          
+          cat > fake_file_selector_linux/lib/file_selector_linux.dart << 'EOF'
+          class FileSelectorLinux {
+            static void registerWith() {}
+          }
+          EOF
+          
+          echo "✅ Boş file_selector_linux paketi oluşturuldu"
       
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -290,36 +324,23 @@ jobs:
       - name: Remove Default Test
         run: rm -f test/widget_test.dart
       
+      # ✅ pubspec.yaml'a override ekle
+      - name: Add dependency override for file_selector_linux
+        run: |
+          if ! grep -q "file_selector_linux:" pubspec.yaml; then
+            echo "" >> pubspec.yaml
+            echo "dependency_overrides:" >> pubspec.yaml
+            echo "  file_selector_linux:" >> pubspec.yaml
+            echo "    path: ./fake_file_selector_linux" >> pubspec.yaml
+          fi
+          echo "✅ pubspec.yaml güncellendi"
+      
       - name: Get Dependencies
         run: flutter pub get
       
       - name: Apply Launcher Icons
         run: dart run flutter_launcher_icons
         continue-on-error: true
-      
-      # ✅ AGRESİF YAMALAMA: Tüm CMake dosyalarından file_selector_linux'u çıkar
-      - name: Disable file_selector_linux Completely
-        run: |
-          # 1. CMakeLists.txt'den çıkar
-          CMAKE_FILE="linux/CMakeLists.txt"
-          if [ -f "$CMAKE_FILE" ]; then
-            sed -i 's/list(APPEND FLUTTER_PLUGIN_LIST file_selector_linux)/# list(APPEND FLUTTER_PLUGIN_LIST file_selector_linux)/' "$CMAKE_FILE"
-            sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
-          fi
-          
-          # 2. generated_plugins.cmake'den çıkar
-          GEN_CMAKE="linux/flutter/generated_plugins.cmake"
-          if [ -f "$GEN_CMAKE" ]; then
-            sed -i '/file_selector_linux/d' "$GEN_CMAKE"
-          fi
-          
-          # 3. generated_plugin_registrant.cc'den çıkar
-          REGISTRANT="linux/flutter/generated_plugin_registrant.cc"
-          if [ -f "$REGISTRANT" ]; then
-            sed -i '/file_selector_linux/d' "$REGISTRANT"
-          fi
-          
-          echo "✅ file_selector_linux tüm CMake dosyalarından çıkarıldı"
       
       - name: Build Linux
         run: |
