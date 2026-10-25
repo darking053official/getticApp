@@ -125,7 +125,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # WINDOWS BUILD (VS2022 YAMASI)
+  # WINDOWS BUILD (ÇİFT YAMALAMA)
   # ==========================================
   build-windows:
     name: Build Windows EXE
@@ -158,25 +158,30 @@ jobs:
         run: dart run flutter_launcher_icons
         continue-on-error: true
       
-      # ✅ KESİN ÇÖZÜM: Flutter'ın build_windows.dart dosyasını VS2022 için yamala
+      # ✅ ÇİFT YAMALAMA: Hem build_windows.dart hem visual_studio.dart
       - name: Patch Flutter for Visual Studio 2022
         run: |
           $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
+          
+          # 1. build_windows.dart yamala
           $buildFile = Join-Path $flutterRoot "packages\flutter_tools\lib\src\windows\build_windows.dart"
-          
-          Write-Host "Flutter root: $flutterRoot"
-          Write-Host "Hedef dosya: $buildFile"
-          
           if (Test-Path $buildFile) {
             $content = Get-Content $buildFile -Raw
             $content = $content -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022'
             Set-Content -Path $buildFile -Value $content -NoNewline
             Write-Host "✅ build_windows.dart güncellendi"
-            Select-String -Path $buildFile -Pattern "Visual Studio 17 2022" | Select-Object -First 3
-          } else {
-            Write-Error "build_windows.dart bulunamadı!"
           }
           
+          # 2. visual_studio.dart yamala (VS kurulum kontrolü için)
+          $vsFile = Join-Path $flutterRoot "packages\flutter_tools\lib\src\windows\visual_studio.dart"
+          if (Test-Path $vsFile) {
+            $content = Get-Content $vsFile -Raw
+            $content = $content -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022'
+            Set-Content -Path $vsFile -Value $content -NoNewline
+            Write-Host "✅ visual_studio.dart güncellendi"
+          }
+          
+          # 3. Flutter tool önbelleğini temizle
           $cacheDir = Join-Path $flutterRoot "bin\cache"
           Remove-Item -Path (Join-Path $cacheDir "flutter_tools.stamp") -ErrorAction SilentlyContinue
           Remove-Item -Path (Join-Path $cacheDir "flutter_tools.snapshot") -ErrorAction SilentlyContinue
@@ -252,7 +257,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # LINUX BUILD (file_selector_linux DEVRE DIŞI)
+  # LINUX BUILD (CMake Dosyalarını Yamala)
   # ==========================================
   build-linux:
     name: Build Linux (AppImage + deb)
@@ -292,21 +297,29 @@ jobs:
         run: dart run flutter_launcher_icons
         continue-on-error: true
       
-      # ✅ KESİN ÇÖZÜM: Sorunlu file_selector_linux paketini derleme dışı bırak
-      - name: Disable file_selector_linux Build
+      # ✅ AGRESİF YAMALAMA: Tüm CMake dosyalarından file_selector_linux'u çıkar
+      - name: Disable file_selector_linux Completely
         run: |
+          # 1. CMakeLists.txt'den çıkar
           CMAKE_FILE="linux/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
             sed -i 's/list(APPEND FLUTTER_PLUGIN_LIST file_selector_linux)/# list(APPEND FLUTTER_PLUGIN_LIST file_selector_linux)/' "$CMAKE_FILE"
             sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
-            echo "✅ file_selector_linux derleme dışı bırakıldı"
           fi
           
+          # 2. generated_plugins.cmake'den çıkar
+          GEN_CMAKE="linux/flutter/generated_plugins.cmake"
+          if [ -f "$GEN_CMAKE" ]; then
+            sed -i '/file_selector_linux/d' "$GEN_CMAKE"
+          fi
+          
+          # 3. generated_plugin_registrant.cc'den çıkar
           REGISTRANT="linux/flutter/generated_plugin_registrant.cc"
           if [ -f "$REGISTRANT" ]; then
             sed -i '/file_selector_linux/d' "$REGISTRANT"
-            echo "✅ generated_plugin_registrant.cc güncellendi"
           fi
+          
+          echo "✅ file_selector_linux tüm CMake dosyalarından çıkarıldı"
       
       - name: Build Linux
         run: |
@@ -323,7 +336,6 @@ jobs:
       - name: Create AppImage
         run: |
           set -e
-          
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
           
@@ -359,16 +371,10 @@ jobs:
           chmod +x $APPDIR/AppRun
           
           ARCH=x86_64 ./appimagetool $APPDIR gettic-linux-x86_64.AppImage
-          
-          ls -lh gettic-linux-x86_64.AppImage
       
-      # ==========================================
-      # .DEB PAKETİ OLUŞTUR
-      # ==========================================
       - name: Create .deb Package
         run: |
           set -e
-          
           DEB_DIR=gettic-deb
           mkdir -p $DEB_DIR/DEBIAN
           mkdir -p $DEB_DIR/usr/bin
@@ -413,14 +419,8 @@ jobs:
           
           chmod 755 $DEB_DIR/DEBIAN
           chmod 644 $DEB_DIR/DEBIAN/control
-          
           dpkg-deb --build $DEB_DIR gettic-linux-amd64.deb
-          
-          ls -lh gettic-linux-amd64.deb
       
-      # ==========================================
-      # ARTIFACT'LARI YÜKLE
-      # ==========================================
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
