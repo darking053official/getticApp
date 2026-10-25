@@ -8,14 +8,17 @@ class StorageService {
   /// Avatar yükler ve public URL döner
   Future<String?> uploadAvatar(File file, String userId) async {
     try {
-      final fileExt = file.path.split('.').last;
+      final fileExt = file.path.split('.').last.toLowerCase();
       final fileName = '$userId-${DateTime.now().millisecondsSinceEpoch}.$fileExt';
       final filePath = 'avatars/$fileName';
 
-      await _client.storage.from(AppConstants.bucketAvatars).upload(filePath, file);
+      await _client.storage
+          .from(AppConstants.bucketAvatars)
+          .upload(filePath, file);
 
-      final publicUrl = _client.storage.from(AppConstants.bucketAvatars).getPublicUrl(filePath);
-      return publicUrl;
+      return _client.storage
+          .from(AppConstants.bucketAvatars)
+          .getPublicUrl(filePath);
     } catch (e) {
       print('Avatar yükleme hatası: $e');
       return null;
