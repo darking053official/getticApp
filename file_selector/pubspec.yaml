@@ -1,0 +1,15 @@
+name: file_selector_linux
+description: Fake empty package to bypass build errors
+version: 0.9.3+2
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+flutter:
+  plugin:
+    implements: file_selector_linux
+    platforms:
+      linux:
+        dartPluginClass: FileSelectorLinux
