@@ -9,9 +9,10 @@ class SupabaseService {
   final Map<String, RealtimeChannel> _typingChannels = {};
 
   User? get currentUser => _client.auth.currentUser;
+  Stream<AuthState> get authStateChanges => _client.auth.onAuthStateChange;
 
   // ==========================================
-  // AUTH
+  // AUTH (KİMLİK DOĞRULAMA)
   // ==========================================
   Future<AuthResponse> signInWithEmail(String email, String password) async {
     return await _client.auth.signInWithPassword(
@@ -49,13 +50,13 @@ class SupabaseService {
     try {
       await _client.rpc('delete_own_account');
     } catch (e) {
-      print('Hesap silme hatası: $e');
+      print('Hesap silme RPC hatası: $e');
     }
     await _client.auth.signOut();
   }
 
   // ==========================================
-  // PROFİL
+  // PROFİL & GİZLİLİK
   // ==========================================
   Future<Profile?> getMyProfile() async {
     if (currentUser == null) return null;
@@ -136,7 +137,7 @@ class SupabaseService {
       final List<Map<String, dynamic>> result = [];
 
       for (var convId in convIds) {
-        // Karşı tarafı bul
+        // 1. Karşı tarafı bul
         final otherMember = await _client
             .from(AppConstants.tableConversationMembers)
             .select('user_id, profiles(*)')
@@ -145,7 +146,7 @@ class SupabaseService {
             .limit(1)
             .maybeSingle();
 
-        // Son mesajı bul
+        // 2. Son mesajı bul
         final lastMsg = await _client
             .from(AppConstants.tableMessages)
             .select('*')
@@ -154,7 +155,7 @@ class SupabaseService {
             .limit(1)
             .maybeSingle();
 
-        // Grup mu? (type 'group' ise is_group = true döner)
+        // 3. Sohbet türünü bul (Grup mu?)
         final convData = await _client
             .from(AppConstants.tableConversations)
             .select('type')
@@ -165,12 +166,12 @@ class SupabaseService {
           'conversation_id': convId,
           'other_user': otherMember?['profiles'],
           'last_message': lastMsg,
-          'unread_count': 0,
+          'unread_count': 0, 
           'is_group': convData?['type'] == 'group',
         });
       }
 
-      // Son mesaja göre sırala
+      // Son mesaja göre sırala (En yeni en üstte)
       result.sort((a, b) {
         final aDate = a['last_message']?['created_at'] ?? '2000-01-01';
         final bDate = b['last_message']?['created_at'] ?? '2000-01-01';
@@ -203,27 +204,13 @@ class SupabaseService {
     return convId;
   }
 
-  // ✅ GÜNCELLENDİ: Önce mesajları, sonra üyeleri, en son sohbeti sil
+  /// Sohbeti ve içindeki tüm mesaj/üyeleri güvenli bir şekilde siler.
   Future<void> deleteConversation(String conversationId) async {
     if (currentUser == null) return;
     try {
-      // 1. Mesajları sil
-      await _client
-          .from(AppConstants.tableMessages)
-          .delete()
-          .eq('conversation_id', conversationId);
-      
-      // 2. Üyeleri sil
-      await _client
-          .from(AppConstants.tableConversationMembers)
-          .delete()
-          .eq('conversation_id', conversationId);
-      
-      // 3. En son sohbeti sil
-      await _client
-          .from(AppConstants.tableConversations)
-          .delete()
-          .eq('id', conversationId);
+      await _client.from(AppConstants.tableMessages).delete().eq('conversation_id', conversationId);
+      await _client.from(AppConstants.tableConversationMembers).delete().eq('conversation_id', conversationId);
+      await _client.from(AppConstants.tableConversations).delete().eq('id', conversationId);
     } catch (e) {
       print('Sohbet silme hatası: $e');
       rethrow;
@@ -258,7 +245,7 @@ class SupabaseService {
         .map((data) => data.map((json) => Message.fromJson(json)).toList());
   }
 
-  Future<void> sendMessage(String conversationId, String content) async {
+  Future<void> sendMessage(String conversationId, String content, {String? replyToId}) async {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
     if (content.trim().isEmpty) throw Exception('Boş mesaj gönderilemez');
 
@@ -267,9 +254,10 @@ class SupabaseService {
       'sender_id': currentUser!.id,
       'content': content.trim(),
       'type': 'text',
+      if (replyToId != null) 'reply_to': replyToId,
     });
 
-    // Sohbetin updated_at değerini yenile
+    // Sohbetin son güncellenme tarihini yenile (Listede en üste çıkması için)
     try {
       await _client.from(AppConstants.tableConversations).update({
         'updated_at': DateTime.now().toIso8601String(),
@@ -279,8 +267,29 @@ class SupabaseService {
     }
   }
 
+  /// Mesajı siler (Soft Delete - "Bu mesaj silindi" yazar)
+  Future<void> deleteMessage(String messageId) async {
+    if (currentUser == null) return;
+    await _client.from(AppConstants.tableMessages).update({
+      'is_deleted': true,
+      'content': null,
+      'deleted_at': DateTime.now().toIso8601String(),
+    }).eq('id', messageId);
+  }
+
+  /// Mesajı düzenler
+  Future<void> editMessage(String messageId, String newContent) async {
+    if (currentUser == null) return;
+    if (newContent.trim().isEmpty) throw Exception('Boş mesaj olamaz');
+    await _client.from(AppConstants.tableMessages).update({
+      'content': newContent.trim(),
+      'is_edited': true,
+      'edited_at': DateTime.now().toIso8601String(),
+    }).eq('id', messageId);
+  }
+
   // ==========================================
-  // OKUNDU
+  // OKUNDU BİLGİSİ (READ RECEIPTS)
   // ==========================================
   Future<void> markMessageAsRead(String messageId, String conversationId) async {
     if (currentUser == null) return;
@@ -310,7 +319,7 @@ class SupabaseService {
   }
 
   // ==========================================
-  // TYPING
+  // TYPING INDICATOR (YAZIYOR GÖSTERGESİ)
   // ==========================================
   RealtimeChannel subscribeToTyping(
     String conversationId,
