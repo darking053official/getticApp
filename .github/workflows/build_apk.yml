@@ -7,7 +7,7 @@ on:
 
 jobs:
   # ==========================================
-  # ANDROID BUILD (ÇALIŞIYOR)
+  # ANDROID BUILD
   # ==========================================
   build-android:
     name: Build Android APK
@@ -71,7 +71,6 @@ jobs:
           flutter config --enable-windows-desktop
           flutter create . --project-name gettic --org com.gettic --platforms=windows
           Remove-Item -Path test/widget_test.dart -ErrorAction SilentlyContinue
-          # VS2022 yaması
           $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
           $files = @("packages\flutter_tools\lib\src\windows\build_windows.dart", "packages\flutter_tools\lib\src\windows\visual_studio.dart")
           foreach ($f in $files) {
@@ -91,7 +90,6 @@ jobs:
             Set-Content pubspec.yaml -Value $content -NoNewline
           }
           flutter pub get
-          Write-Host "✅ flutter_secure_storage devre dışı"
       - run: flutter build windows --release
       - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath gettic-windows.zip
       - uses: actions/upload-artifact@v4
@@ -117,9 +115,7 @@ jobs:
           flutter config --enable-macos-desktop
           flutter create . --project-name gettic --org com.gettic --platforms=macos
           rm -f test/widget_test.dart
-          # Xcode projesindeki deployment target'ı 10.15 yap
           find macos -name "*.pbxproj" -exec sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = [0-9.]*;/MACOSX_DEPLOYMENT_TARGET = 10.15;/g' {} \;
-          # Podfile'ı düzelt
           if [ -f "macos/Podfile" ]; then
             sed -i '' "s/platform :osx, .*/platform :osx, '10.15'/" macos/Podfile
           fi
@@ -134,7 +130,7 @@ jobs:
           path: build/macos/Build/Products/Release/gettic-macos.zip
 
   # ==========================================
-  # LINUX BUILD (DOĞRU SAHTE PAKET)
+  # LINUX BUILD (NULLABLE DÜZELTİLDİ)
   # ==========================================
   build-linux:
     name: Build Linux
@@ -146,7 +142,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev fuse libfuse2 libsecret-1-dev libjsoncpp-dev
       
-      # ✅ DOĞRU SAHTE PAKET: FileSelectorPlatform interface'ini implement eder
+      # ✅ DÜZELTİLMİŞ SAHTE PAKET (nullable parametreler)
       - name: Create Fake file_selector_linux Package
         run: |
           mkdir -p fake_file_selector_linux/lib
@@ -180,7 +176,7 @@ jobs:
 
             @override
             Future<XFile?> openFile({
-              List<XTypeGroup> acceptedTypeGroups = const <XTypeGroup>[],
+              List<XTypeGroup>? acceptedTypeGroups,
               String? initialDirectory,
               String? confirmButtonText,
             }) async {
@@ -189,7 +185,7 @@ jobs:
 
             @override
             Future<List<XFile>> openFiles({
-              List<XTypeGroup> acceptedTypeGroups = const <XTypeGroup>[],
+              List<XTypeGroup>? acceptedTypeGroups,
               String? initialDirectory,
               String? confirmButtonText,
             }) async {
@@ -198,7 +194,7 @@ jobs:
 
             @override
             Future<String?> getSavePath({
-              List<XTypeGroup> acceptedTypeGroups = const <XTypeGroup>[],
+              List<XTypeGroup>? acceptedTypeGroups,
               String? initialDirectory,
               String? suggestedName,
               String? confirmButtonText,
@@ -216,7 +212,7 @@ jobs:
           }
           EOF
           
-          echo "✅ Doğru sahte paket oluşturuldu"
+          echo "✅ Doğru sahte paket oluşturuldu (nullable parametreler)"
       
       - uses: subosito/flutter-action@v2
         with:
@@ -230,7 +226,6 @@ jobs:
           flutter create . --project-name gettic --org com.gettic --platforms=linux
           rm -f test/widget_test.dart
       
-      # ✅ pubspec.yaml'a override ekle (SADECE file_selector_linux)
       - name: Add dependency override
         run: |
           if ! grep -q "file_selector_linux:" pubspec.yaml; then
@@ -244,7 +239,6 @@ jobs:
             fi
           fi
           echo "✅ pubspec.yaml güncellendi"
-          grep -A3 "dependency_overrides" pubspec.yaml
       
       - name: Get Dependencies
         run: flutter pub get
