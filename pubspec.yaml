@@ -9,29 +9,64 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  cupertino_icons: ^1.0.6
+  
+  # --- Backend & Auth ---
   supabase_flutter: ^2.5.0
-  intl: ^0.19.0
-  flutter_riverpod: ^2.5.1
-  google_fonts: ^6.2.1
-  cached_network_image: ^3.3.1
   flutter_secure_storage: ^9.0.0
+  
+  # --- UI & Utilities ---
+  intl: ^0.19.0
+  cached_network_image: ^3.3.1
   image_picker: ^1.1.2
-  emoji_picker_flutter: ^2.1.1
+  emoji_picker_flutter: ^2.1.1  # ✅ Flutter 3.19.2 ile uyumlu sürüm
+  
+  # --- State Management ---
+  flutter_riverpod: ^2.5.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.0  # ✅ Splash için eklendi
 
+# --- UYGULAMA İKONU KONFİGÜRASYONU ---
 flutter_launcher_icons:
-  android: "launcher_icon"
+  android: "ic_launcher"
   ios: false
   image_path: "assets/logo.png"
   min_sdk_android: 21
+  adaptive_icon_background: "#0a0a0f"
+  adaptive_icon_foreground: "assets/logo.png"
+
+# --- SPLASH SCREEN KONFİGÜRASYONU ---
+flutter_native_splash:
+  # Arka plan rengi (Dark tema)
+  color: "#0a0a0f"
+  # Ortadaki logo
+  image: "assets/logo.png"
+  
+  # Android 12+ için özel ayarlar
+  android_12:
+    color: "#0a0a0f"
+    image: "assets/logo.png"
+    icon_background_color: "#0a0a0f"
+  
+  # Platformlar
+  android: true
+  ios: false
+  web: false
+  
+  # Ekstra ayarlar
+  fullscreen: true
+  android_gravity: center
+  ios_content_mode: center
 
 flutter:
   uses-material-design: true
   assets:
     - assets/logo.png
+    - assets/google.png
+    - assets/github.png
     - assets/qr.png
