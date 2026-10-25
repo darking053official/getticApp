@@ -1,7 +1,7 @@
 name: gettic
 description: Gettic - Gizlilik odaklı mesajlaşma uygulaması
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -19,17 +19,21 @@ dependencies:
   intl: ^0.19.0
   cached_network_image: ^3.3.1
   image_picker: ^1.1.2
-  emoji_picker_flutter: ^2.1.1  # ✅ Flutter 3.19.2 ile uyumlu sürüm
+  emoji_picker_flutter: ^2.1.1  # Flutter 3.19.2 ile uyumlu
   
   # --- State Management ---
   flutter_riverpod: ^2.5.1
+
+  # --- Platform Uyumluluğu (Sabit Sürümler) ---
+  shared_preferences: 2.2.3
+  path_provider: 2.1.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.13.1
-  flutter_native_splash: ^2.4.0  # ✅ Splash için eklendi
+  flutter_native_splash: ^2.4.0
 
 # --- UYGULAMA İKONU KONFİGÜRASYONU ---
 flutter_launcher_icons:
@@ -39,26 +43,29 @@ flutter_launcher_icons:
   min_sdk_android: 21
   adaptive_icon_background: "#0a0a0f"
   adaptive_icon_foreground: "assets/logo.png"
+  # Windows ve macOS için de ikon üret
+  windows:
+    generate: true
+    image_path: "assets/logo.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/logo.png"
 
 # --- SPLASH SCREEN KONFİGÜRASYONU ---
 flutter_native_splash:
-  # Arka plan rengi (Dark tema)
   color: "#0a0a0f"
-  # Ortadaki logo
   image: "assets/logo.png"
   
-  # Android 12+ için özel ayarlar
   android_12:
     color: "#0a0a0f"
     image: "assets/logo.png"
     icon_background_color: "#0a0a0f"
   
-  # Platformlar
   android: true
   ios: false
   web: false
   
-  # Ekstra ayarlar
   fullscreen: true
   android_gravity: center
   ios_content_mode: center
@@ -70,3 +77,14 @@ flutter:
     - assets/google.png
     - assets/github.png
     - assets/qr.png
+
+# ✅ Platform Build Uyumluluğu (dependency_overrides)
+dependency_overrides:
+  # R8 "sealed class" hatasını çözmek için record paketlerini eski sürümlere sabitle
+  record: 5.1.0
+  record_android: 1.2.1
+  record_platform_interface: 1.0.2
+  record_linux: 0.7.1
+  record_web: 1.1.0
+  record_windows: 1.0.2
+  record_darwin: 1.0.1
