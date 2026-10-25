@@ -1,11 +1,13 @@
 class Profile {
   final String id;
   final String username;
-  final String? fullName;
+  final String? fullName;       // Bio/Hakkımda
   final String? avatarUrl;
-  final String status;
+  final String status;          // "online", "offline", veya özel durum mesajı
   final bool showOnlineStatus;
   final bool showLastSeen;
+  final DateTime? lastSeenAt;   // Son görülme zamanı (yeni)
+  final DateTime? createdAt;    // Hesap oluşturma (yeni)
 
   Profile({
     required this.id,
@@ -15,28 +17,32 @@ class Profile {
     this.status = 'offline',
     this.showOnlineStatus = true,
     this.showLastSeen = true,
+    this.lastSeenAt,
+    this.createdAt,
   });
 
-  // Supabase'den gelen JSON verisini modele çevirir
+  // Supabase'den gelen JSON'u Profile modeline çevirir
   factory Profile.fromJson(Map<String, dynamic> json) {
     return Profile(
-      // id null gelebilir veya int olabilir → güvenli dönüşüm
       id: json['id']?.toString() ?? '',
-      // username null ise varsayılan göster
       username: (json['username'] as String?) ?? 'Kullanıcı',
       fullName: json['full_name'] as String?,
       avatarUrl: json['avatar_url'] as String?,
-      // status null veya boş ise offline
-      status: (json['status'] as String?)?.isNotEmpty == true 
-          ? json['status'] as String 
+      status: (json['status'] as String?)?.isNotEmpty == true
+          ? json['status'] as String
           : 'offline',
-      // Bool alanlar için tip güvenli dönüşüm
       showOnlineStatus: _parseBool(json['show_online_status'], defaultValue: true),
       showLastSeen: _parseBool(json['show_last_seen'], defaultValue: true),
+      lastSeenAt: json['last_seen_at'] != null
+          ? DateTime.tryParse(json['last_seen_at'].toString())
+          : null,
+      createdAt: json['created_at'] != null
+          ? DateTime.tryParse(json['created_at'].toString())
+          : null,
     );
   }
 
-  // Supabase'e gönderilecek Map
+  // Profile modelini JSON'a çevirir
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -46,10 +52,12 @@ class Profile {
       'status': status,
       'show_online_status': showOnlineStatus,
       'show_last_seen': showLastSeen,
+      'last_seen_at': lastSeenAt?.toIso8601String(),
+      'created_at': createdAt?.toIso8601String(),
     };
   }
 
-  // Sadece belirli bir alanı değiştirip yeni nesne oluşturmak için
+  // Sadece belirli alanları değiştirip yeni bir Profile oluşturur
   Profile copyWith({
     String? id,
     String? username,
@@ -58,6 +66,8 @@ class Profile {
     String? status,
     bool? showOnlineStatus,
     bool? showLastSeen,
+    DateTime? lastSeenAt,
+    DateTime? createdAt,
   }) {
     return Profile(
       id: id ?? this.id,
@@ -67,11 +77,19 @@ class Profile {
       status: status ?? this.status,
       showOnlineStatus: showOnlineStatus ?? this.showOnlineStatus,
       showLastSeen: showLastSeen ?? this.showLastSeen,
+      lastSeenAt: lastSeenAt ?? this.lastSeenAt,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 
-  // Bool alanları güvenli şekilde parse eden yardımcı fonksiyon
-  // (Supabase bazı sürümlerde 0/1, 'true'/'false' döndürebilir)
+  // Kullanıcı çevrimiçi mi?
+  bool get isOnline => status == 'online';
+
+  // Avatar yoksa baş harfi döner
+  String get initial =>
+      username.isNotEmpty ? username[0].toUpperCase() : '?';
+
+  // Bool alanları güvenli şekilde parse eder (0/1, 'true'/'false' destekli)
   static bool _parseBool(dynamic value, {bool defaultValue = true}) {
     if (value == null) return defaultValue;
     if (value is bool) return value;
