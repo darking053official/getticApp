@@ -29,26 +29,44 @@ jobs:
           channel: 'stable'
           cache: true
       
-      # 4. Flutter projesini hazırla (Android klasörü yoksa oluştur)
+      # 4. Flutter projesini hazırla
       - name: Ensure Flutter project structure
         run: flutter create . --project-name gettic --org com.gettic --platforms=android
       
-      # 4.1. KOTLIN SÜRÜMÜNÜ GÜNCELLE (emoji_picker_flutter hatasını çözer)
+      # 4.1. Kotlin sürümünü güncelle
       - name: Update Kotlin Version
         run: |
           SETTINGS_FILE="android/settings.gradle"
           if [ -f "$SETTINGS_FILE" ]; then
-            # Kotlin sürümünü 1.9.23'e yükselt
             sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.23"/' "$SETTINGS_FILE"
             echo "✅ Kotlin sürümü güncellendi:"
             grep "org.jetbrains.kotlin.android" "$SETTINGS_FILE"
           fi
-          # Kotlin DSL (build.gradle.kts) varsa oradaki sürümü de güncelle
           SETTINGS_KTS_FILE="android/settings.gradle.kts"
           if [ -f "$SETTINGS_KTS_FILE" ]; then
             sed -i 's/id("org.jetbrains.kotlin.android") version "[^"]*"/id("org.jetbrains.kotlin.android") version "1.9.23"/' "$SETTINGS_KTS_FILE"
             echo "✅ Kotlin DSL sürümü güncellendi:"
             grep "org.jetbrains.kotlin.android" "$SETTINGS_KTS_FILE"
+          fi
+      
+      # 4.2. minSdkVersion'ı 21 yap (emoji_picker_flutter için zorunlu)
+      - name: Set Min SDK Version to 21
+        run: |
+          GRADLE_FILE="android/app/build.gradle"
+          GRADLE_KTS_FILE="android/app/build.gradle.kts"
+          
+          if [ -f "$GRADLE_FILE" ]; then
+            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' "$GRADLE_FILE"
+            sed -i 's/minSdkVersion [0-9]*/minSdkVersion 21/' "$GRADLE_FILE"
+            echo "✅ Groovy minSdkVersion 21 yapıldı:"
+            grep "minSdkVersion" "$GRADLE_FILE"
+          fi
+          
+          if [ -f "$GRADLE_KTS_FILE" ]; then
+            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/' "$GRADLE_KTS_FILE"
+            sed -i 's/minSdk = [0-9]*/minSdk = 21/' "$GRADLE_KTS_FILE"
+            echo "✅ Kotlin DSL minSdk 21 yapıldı:"
+            grep "minSdk" "$GRADLE_KTS_FILE"
           fi
       
       # 5. Uygulama ID'sini ayarla
@@ -63,37 +81,31 @@ jobs:
           echo "📦 Uygulama ID'si:"
           grep -r "applicationId" android/app/ | head -5
       
-      # 6. TÜM İZİNLERİ EKLE (İnternet + Kamera + Depolama)
+      # 6. TÜM İZİNLERİ EKLE
       - name: Add All Permissions to Manifest
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            # INTERNET
             if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
               sed -i '/<manifest /a \    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
               echo "✅ INTERNET izni eklendi"
             fi
-            # CAMERA
             if ! grep -q "android.permission.CAMERA" "$MANIFEST"; then
               sed -i '/<manifest /a \    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
               echo "✅ CAMERA izni eklendi"
             fi
-            # READ_EXTERNAL_STORAGE
             if ! grep -q "android.permission.READ_EXTERNAL_STORAGE" "$MANIFEST"; then
               sed -i '/<manifest /a \    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' "$MANIFEST"
               echo "✅ READ_EXTERNAL_STORAGE izni eklendi"
             fi
-            # READ_MEDIA_IMAGES
             if ! grep -q "android.permission.READ_MEDIA_IMAGES" "$MANIFEST"; then
               sed -i '/<manifest /a \    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />' "$MANIFEST"
               echo "✅ READ_MEDIA_IMAGES izni eklendi"
             fi
-            # WRITE_EXTERNAL_STORAGE
             if ! grep -q "android.permission.WRITE_EXTERNAL_STORAGE" "$MANIFEST"; then
               sed -i '/<manifest /a \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />' "$MANIFEST"
               echo "✅ WRITE_EXTERNAL_STORAGE izni eklendi"
             fi
-            
             echo ""
             echo "📋 Manifest ilk 15 satır:"
             head -15 "$MANIFEST"
@@ -127,7 +139,7 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
         continue-on-error: true
       
-      # 12. Release APK üret (Kotlin hatasını önlemek için temizlikle)
+      # 12. Release APK üret
       - name: Clean and Build Release APK
         run: |
           flutter clean
