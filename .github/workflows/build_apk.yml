@@ -7,7 +7,7 @@ on:
 
 jobs:
   # ==========================================
-  # ANDROID BUILD (Değişmedi)
+  # ANDROID BUILD
   # ==========================================
   build-android:
     name: Build Android APK
@@ -45,12 +45,12 @@ jobs:
       - name: Set Min SDK Version
         run: |
           if [ -f "android/app/build.gradle" ]; then
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle
-            sed -i 's/minSdkVersion [0-9]*/minSdkVersion 21/' android/app/build.gradle
+            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle
+            sed -i 's/minSdkVersion [0-9]*/minSdkVersion 23/' android/app/build.gradle
           fi
           if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/' android/app/build.gradle.kts
-            sed -i 's/minSdk = [0-9]*/minSdk = 21/' android/app/build.gradle.kts
+            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle.kts
+            sed -i 's/minSdk = [0-9]*/minSdk = 23/' android/app/build.gradle.kts
           fi
       
       - name: Set Application ID
@@ -66,7 +66,7 @@ jobs:
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
-            for perm in "android.permission.INTERNET" "android.permission.CAMERA" "android.permission.READ_EXTERNAL_STORAGE" "android.permission.READ_MEDIA_IMAGES"; do
+            for perm in "android.permission.INTERNET" "android.permission.CAMERA" "android.permission.READ_EXTERNAL_STORAGE" "android.permission.READ_MEDIA_IMAGES" "android.permission.RECORD_AUDIO"; do
               if ! grep -q "$perm" "$MANIFEST"; then
                 sed -i "/<manifest /a \    <uses-permission android:name=\"$perm\" />" "$MANIFEST"
               fi
@@ -125,7 +125,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # WINDOWS BUILD (KESİN ÇÖZÜM)
+  # WINDOWS BUILD (VS2022 YAMASI)
   # ==========================================
   build-windows:
     name: Build Windows EXE
@@ -158,10 +158,9 @@ jobs:
         run: dart run flutter_launcher_icons
         continue-on-error: true
       
-      # ✅ KESİN ÇÖZÜM: Doğru dosyayı bul ve VS2022 için yamala
-      - name: Patch Flutter Visual Studio Generator
+      # ✅ KESİN ÇÖZÜM: Flutter'ın build_windows.dart dosyasını VS2022 için yamala
+      - name: Patch Flutter for Visual Studio 2022
         run: |
-          # Flutter'ın kurulu olduğu yolu bul
           $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
           $buildFile = Join-Path $flutterRoot "packages\flutter_tools\lib\src\windows\build_windows.dart"
           
@@ -169,19 +168,15 @@ jobs:
           Write-Host "Hedef dosya: $buildFile"
           
           if (Test-Path $buildFile) {
-            # İçeriği oku ve değiştir
             $content = Get-Content $buildFile -Raw
             $content = $content -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022'
             Set-Content -Path $buildFile -Value $content -NoNewline
             Write-Host "✅ build_windows.dart güncellendi"
-            
-            # Doğrula
             Select-String -Path $buildFile -Pattern "Visual Studio 17 2022" | Select-Object -First 3
           } else {
             Write-Error "build_windows.dart bulunamadı!"
           }
           
-          # Flutter tool önbelleğini temizle (ZORUNLU)
           $cacheDir = Join-Path $flutterRoot "bin\cache"
           Remove-Item -Path (Join-Path $cacheDir "flutter_tools.stamp") -ErrorAction SilentlyContinue
           Remove-Item -Path (Join-Path $cacheDir "flutter_tools.snapshot") -ErrorAction SilentlyContinue
@@ -205,7 +200,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # MACOS BUILD (Değişmedi)
+  # MACOS BUILD
   # ==========================================
   build-macos:
     name: Build macOS DMG
@@ -257,7 +252,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # LINUX BUILD (KESİN ÇÖZÜM)
+  # LINUX BUILD (file_selector_linux DEVRE DIŞI)
   # ==========================================
   build-linux:
     name: Build Linux (AppImage + deb)
@@ -297,21 +292,16 @@ jobs:
         run: dart run flutter_launcher_icons
         continue-on-error: true
       
-      # ✅ KESİN ÇÖZÜM: file_selector_linux derlemesini atla
+      # ✅ KESİN ÇÖZÜM: Sorunlu file_selector_linux paketini derleme dışı bırak
       - name: Disable file_selector_linux Build
         run: |
           CMAKE_FILE="linux/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
-            # file_selector_linux paketini derleme dışı bırak
             sed -i 's/list(APPEND FLUTTER_PLUGIN_LIST file_selector_linux)/# list(APPEND FLUTTER_PLUGIN_LIST file_selector_linux)/' "$CMAKE_FILE"
-            echo "✅ file_selector_linux derleme dışı bırakıldı"
-            
-            # Ayrıca -Werror'ı da kapat (flutter_secure_storage için)
             sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
-            echo "✅ -Werror devre dışı bırakıldı"
+            echo "✅ file_selector_linux derleme dışı bırakıldı"
           fi
           
-          # generated_plugin_registrant.cc dosyasından da kaldır
           REGISTRANT="linux/flutter/generated_plugin_registrant.cc"
           if [ -f "$REGISTRANT" ]; then
             sed -i '/file_selector_linux/d' "$REGISTRANT"
@@ -411,7 +401,7 @@ jobs:
           
           cat > $DEB_DIR/DEBIAN/control << 'EOF'
           Package: gettic
-          Version: 1.1.0
+          Version: 1.2.0
           Section: net
           Priority: optional
           Architecture: amd64
