@@ -44,9 +44,17 @@ jobs:
         with:
           name: gettic-android-arm64
           path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-android-armv7
+          path: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-android-x86_64
+          path: build/app/outputs/flutter-apk/app-x86_64-release.apk
 
   # ==========================================
-  # WINDOWS BUILD (ATL YOK, PAKET DEVRE DIŞI)
+  # WINDOWS BUILD (ÇALIŞIYOR)
   # ==========================================
   build-windows:
     name: Build Windows EXE
@@ -77,7 +85,6 @@ jobs:
           Remove-Item -Path "$cacheDir\flutter_tools.snapshot" -ErrorAction SilentlyContinue
       - name: Disable flutter_secure_storage for Windows
         run: |
-          # Windows'ta flutter_secure_storage'ı devre dışı bırak (ATL yok)
           if (Test-Path "pubspec.yaml") {
             $content = Get-Content pubspec.yaml -Raw
             $content = $content -replace "flutter_secure_storage: \^9\.0\.0", "# flutter_secure_storage: ^9.0.0"
@@ -93,7 +100,7 @@ jobs:
           path: gettic-windows.zip
 
   # ==========================================
-  # MACOS BUILD (SADECE XCODE GÜNCELLE)
+  # MACOS BUILD (ÇALIŞIYOR)
   # ==========================================
   build-macos:
     name: Build macOS
@@ -127,7 +134,7 @@ jobs:
           path: build/macos/Build/Products/Release/gettic-macos.zip
 
   # ==========================================
-  # LINUX BUILD (file_selector TAMAMEN KALDIRILDI)
+  # LINUX BUILD (DOĞRU SAHTE PAKET)
   # ==========================================
   build-linux:
     name: Build Linux
@@ -138,24 +145,116 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev fuse libfuse2 libsecret-1-dev libjsoncpp-dev
+      
+      # ✅ DOĞRU SAHTE PAKET: FileSelectorPlatform interface'ini implement eder
+      - name: Create Fake file_selector_linux Package
+        run: |
+          mkdir -p fake_file_selector_linux/lib
+          
+          cat > fake_file_selector_linux/pubspec.yaml << 'EOF'
+          name: file_selector_linux
+          description: Fake file_selector_linux for Linux build
+          version: 0.9.3+2
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+            flutter: '>=3.0.0'
+          dependencies:
+            flutter:
+              sdk: flutter
+            file_selector_platform_interface: ^2.6.2
+          flutter:
+            plugin:
+              implements: file_selector_linux
+              platforms:
+                linux:
+                  dartPluginClass: FileSelectorLinux
+          EOF
+          
+          cat > fake_file_selector_linux/lib/file_selector_linux.dart << 'EOF'
+          import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
+
+          class FileSelectorLinux extends FileSelectorPlatform {
+            static void registerWith() {
+              FileSelectorPlatform.instance = FileSelectorLinux();
+            }
+
+            @override
+            Future<XFile?> openFile({
+              List<XTypeGroup> acceptedTypeGroups = const <XTypeGroup>[],
+              String? initialDirectory,
+              String? confirmButtonText,
+            }) async {
+              throw UnimplementedError('File selection not supported on Linux build');
+            }
+
+            @override
+            Future<List<XFile>> openFiles({
+              List<XTypeGroup> acceptedTypeGroups = const <XTypeGroup>[],
+              String? initialDirectory,
+              String? confirmButtonText,
+            }) async {
+              throw UnimplementedError('File selection not supported on Linux build');
+            }
+
+            @override
+            Future<String?> getSavePath({
+              List<XTypeGroup> acceptedTypeGroups = const <XTypeGroup>[],
+              String? initialDirectory,
+              String? suggestedName,
+              String? confirmButtonText,
+            }) async {
+              throw UnimplementedError('Save dialog not supported on Linux build');
+            }
+
+            @override
+            Future<String?> getDirectoryPath({
+              String? initialDirectory,
+              String? confirmButtonText,
+            }) async {
+              throw UnimplementedError('Directory selection not supported on Linux build');
+            }
+          }
+          EOF
+          
+          echo "✅ Doğru sahte paket oluşturuldu"
+      
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.2'
           channel: 'stable'
           cache: true
+      
       - name: Setup Linux
         run: |
           flutter config --enable-linux-desktop
           flutter create . --project-name gettic --org com.gettic --platforms=linux
           rm -f test/widget_test.dart
-          # Linux'ta file_selector ve flutter_secure_storage'ı devre dışı bırak
-          if [ -f "pubspec.yaml" ]; then
-            sed -i 's/image_picker: \^1\.1\.2/# image_picker: ^1.1.2/' pubspec.yaml
-            sed -i 's/flutter_secure_storage: \^9\.0\.0/# flutter_secure_storage: ^9.0.0/' pubspec.yaml
+      
+      # ✅ pubspec.yaml'a override ekle (SADECE file_selector_linux)
+      - name: Add dependency override
+        run: |
+          if ! grep -q "file_selector_linux:" pubspec.yaml; then
+            if grep -q "^dependency_overrides:" pubspec.yaml; then
+              sed -i '/^dependency_overrides:/a \  file_selector_linux:\n    path: ./fake_file_selector_linux' pubspec.yaml
+            else
+              echo "" >> pubspec.yaml
+              echo "dependency_overrides:" >> pubspec.yaml
+              echo "  file_selector_linux:" >> pubspec.yaml
+              echo "    path: ./fake_file_selector_linux" >> pubspec.yaml
+            fi
           fi
+          echo "✅ pubspec.yaml güncellendi"
+          grep -A3 "dependency_overrides" pubspec.yaml
+      
+      - name: Get Dependencies
+        run: flutter pub get
+      
+      - name: Build Linux
+        run: |
+          flutter clean
           flutter pub get
-          echo "✅ Linux için paketler temizlendi"
-      - run: flutter build linux --release
+          flutter build linux --release
+      
       - name: Create AppImage
         run: |
           set -e
@@ -184,6 +283,7 @@ jobs:
           EOF
           chmod +x $APPDIR/AppRun
           ARCH=x86_64 ./appimagetool $APPDIR gettic-linux-x86_64.AppImage
+      
       - uses: actions/upload-artifact@v4
         with:
           name: gettic-linux-appimage
