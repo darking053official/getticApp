@@ -9,19 +9,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  supabase_flutter: ^2.0.0
+  supabase_flutter: ^2.5.0
   intl: ^0.19.0
-  
-  # --- State Management (main.dart için zorunlu) ---
   flutter_riverpod: ^2.5.1
-  
-  # --- UI & Font (theme.dart için zorunlu) ---
   google_fonts: ^6.2.1
-  
-  # --- Profil Avatar Önbelleği (profile_page.dart için) ---
   cached_network_image: ^3.3.1
-  
-  # --- Güvenli Depolama (Supabase Auth Token'ları için) ---
   flutter_secure_storage: ^9.0.0
 
 dev_dependencies:
@@ -40,3 +32,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/logo.png
+    - assets/qr.png
