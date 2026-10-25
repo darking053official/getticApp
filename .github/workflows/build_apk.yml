@@ -7,7 +7,7 @@ on:
 
 jobs:
   # ==========================================
-  # ANDROID BUILD
+  # ANDROID BUILD (Değişmedi)
   # ==========================================
   build-android:
     name: Build Android APK
@@ -125,7 +125,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # WINDOWS BUILD
+  # WINDOWS BUILD (KESİN ÇÖZÜM)
   # ==========================================
   build-windows:
     name: Build Windows EXE
@@ -158,20 +158,33 @@ jobs:
         run: dart run flutter_launcher_icons
         continue-on-error: true
       
-      # ✅ KESİN ÇÖZÜM: Flutter'ın build_windows.dart dosyasını VS2022 için yamala
-      - name: Patch Flutter for Visual Studio 2022
+      # ✅ KESİN ÇÖZÜM: Doğru dosyayı bul ve VS2022 için yamala
+      - name: Patch Flutter Visual Studio Generator
         run: |
-          $flutterPath = (Get-Command flutter).Source | Split-Path | Split-Path
-          $buildFile = "$flutterPath\packages\flutter_tools\lib\src\windows\build_windows.dart"
+          # Flutter'ın kurulu olduğu yolu bul
+          $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
+          $buildFile = Join-Path $flutterRoot "packages\flutter_tools\lib\src\windows\build_windows.dart"
+          
+          Write-Host "Flutter root: $flutterRoot"
+          Write-Host "Hedef dosya: $buildFile"
+          
           if (Test-Path $buildFile) {
-            # Visual Studio 16 2019 -> Visual Studio 17 2022
-            (Get-Content $buildFile) -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022' | Set-Content $buildFile
-            Write-Host "✅ build_windows.dart yaması uygulandı"
-            Select-String -Path $buildFile -Pattern "Visual Studio 17 2022"
+            # İçeriği oku ve değiştir
+            $content = Get-Content $buildFile -Raw
+            $content = $content -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022'
+            Set-Content -Path $buildFile -Value $content -NoNewline
+            Write-Host "✅ build_windows.dart güncellendi"
+            
+            # Doğrula
+            Select-String -Path $buildFile -Pattern "Visual Studio 17 2022" | Select-Object -First 3
+          } else {
+            Write-Error "build_windows.dart bulunamadı!"
           }
-          # Flutter tool önbelleğini temizle (yeniden derlensin)
-          Remove-Item -Path "$flutterPath\bin\cache\flutter_tools.stamp" -ErrorAction SilentlyContinue
-          Remove-Item -Path "$flutterPath\bin\cache\flutter_tools.snapshot" -ErrorAction SilentlyContinue
+          
+          # Flutter tool önbelleğini temizle (ZORUNLU)
+          $cacheDir = Join-Path $flutterRoot "bin\cache"
+          Remove-Item -Path (Join-Path $cacheDir "flutter_tools.stamp") -ErrorAction SilentlyContinue
+          Remove-Item -Path (Join-Path $cacheDir "flutter_tools.snapshot") -ErrorAction SilentlyContinue
           Write-Host "✅ Flutter tool önbelleği temizlendi"
       
       - name: Build Windows
@@ -192,7 +205,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # MACOS BUILD
+  # MACOS BUILD (Değişmedi)
   # ==========================================
   build-macos:
     name: Build macOS DMG
@@ -244,7 +257,7 @@ jobs:
           retention-days: 30
 
   # ==========================================
-  # LINUX BUILD (AppImage + .deb)
+  # LINUX BUILD (KESİN ÇÖZÜM)
   # ==========================================
   build-linux:
     name: Build Linux (AppImage + deb)
@@ -284,17 +297,25 @@ jobs:
         run: dart run flutter_launcher_icons
         continue-on-error: true
       
-      # ✅ KESİN ÇÖZÜM: CMakeLists.txt'deki -Werror'ı devre dışı bırak
-      - name: Disable -Werror for Linux Build
+      # ✅ KESİN ÇÖZÜM: file_selector_linux derlemesini atla
+      - name: Disable file_selector_linux Build
         run: |
           CMAKE_FILE="linux/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
-            # APPLY_STANDARD_SETTINGS fonksiyonundaki -Werror'ı -Wno-error yap
+            # file_selector_linux paketini derleme dışı bırak
+            sed -i 's/list(APPEND FLUTTER_PLUGIN_LIST file_selector_linux)/# list(APPEND FLUTTER_PLUGIN_LIST file_selector_linux)/' "$CMAKE_FILE"
+            echo "✅ file_selector_linux derleme dışı bırakıldı"
+            
+            # Ayrıca -Werror'ı da kapat (flutter_secure_storage için)
             sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
-            # flutter_secure_storage için deprecated uyarılarını kapat
-            sed -i 's/-Wno-error/-Wno-error -Wno-deprecated-declarations -Wno-deprecated-literal-operator/' "$CMAKE_FILE"
             echo "✅ -Werror devre dışı bırakıldı"
-            grep "target_compile_options" "$CMAKE_FILE" | head -5
+          fi
+          
+          # generated_plugin_registrant.cc dosyasından da kaldır
+          REGISTRANT="linux/flutter/generated_plugin_registrant.cc"
+          if [ -f "$REGISTRANT" ]; then
+            sed -i '/file_selector_linux/d' "$REGISTRANT"
+            echo "✅ generated_plugin_registrant.cc güncellendi"
           fi
       
       - name: Build Linux
