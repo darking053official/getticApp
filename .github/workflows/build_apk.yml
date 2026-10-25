@@ -130,6 +130,9 @@ jobs:
   build-windows:
     name: Build Windows EXE
     runs-on: windows-latest
+    env:
+      # Visual Studio 2022'yi kullan (2019 yerine)
+      FLUTTER_WINDOWS_VS_VERSION: '2022'
     
     steps:
       - name: Checkout code
@@ -243,6 +246,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
           sudo apt-get install -y fuse libfuse2
+          # flutter_secure_storage_linux için gerekli
+          sudo apt-get install -y libsecret-1-dev libjsoncpp-dev
       
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -283,20 +288,16 @@ jobs:
         run: |
           set -e
           
-          # AppImageTool indir
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
           
-          # AppDir yapısı oluştur
           APPDIR=AppDir
           mkdir -p $APPDIR/usr/bin
           mkdir -p $APPDIR/usr/share/applications
           mkdir -p $APPDIR/usr/share/icons/hicolor/256x256/apps
           
-          # Uygulamayı kopyala
           cp -r build/linux/x64/release/bundle/* $APPDIR/usr/bin/
           
-          # Desktop entry
           cat > $APPDIR/gettic.desktop << 'EOF'
           [Desktop Entry]
           Type=Application
@@ -309,13 +310,11 @@ jobs:
           EOF
           cp $APPDIR/gettic.desktop $APPDIR/usr/share/applications/
           
-          # İkon
           if [ -f "assets/logo.png" ]; then
             cp assets/logo.png $APPDIR/gettic.png
             cp assets/logo.png $APPDIR/usr/share/icons/hicolor/256x256/apps/gettic.png
           fi
           
-          # AppRun
           cat > $APPDIR/AppRun << 'EOF'
           #!/bin/bash
           HERE="$(dirname "$(readlink -f "${0}")")"
@@ -323,7 +322,6 @@ jobs:
           EOF
           chmod +x $APPDIR/AppRun
           
-          # AppImage oluştur
           ARCH=x86_64 ./appimagetool $APPDIR gettic-linux-x86_64.AppImage
           
           ls -lh gettic-linux-x86_64.AppImage
@@ -335,7 +333,6 @@ jobs:
         run: |
           set -e
           
-          # Paket yapısı
           DEB_DIR=gettic-deb
           mkdir -p $DEB_DIR/DEBIAN
           mkdir -p $DEB_DIR/usr/bin
@@ -343,17 +340,14 @@ jobs:
           mkdir -p $DEB_DIR/usr/share/applications
           mkdir -p $DEB_DIR/usr/share/icons/hicolor/256x256/apps
           
-          # Uygulama dosyalarını kopyala
           cp -r build/linux/x64/release/bundle/* $DEB_DIR/usr/lib/gettic/
           
-          # Wrapper script
           cat > $DEB_DIR/usr/bin/gettic << 'EOF'
           #!/bin/bash
           exec /usr/lib/gettic/gettic "$@"
           EOF
           chmod +x $DEB_DIR/usr/bin/gettic
           
-          # Desktop entry
           cat > $DEB_DIR/usr/share/applications/gettic.desktop << 'EOF'
           [Desktop Entry]
           Type=Application
@@ -365,12 +359,10 @@ jobs:
           Terminal=false
           EOF
           
-          # İkon
           if [ -f "assets/logo.png" ]; then
             cp assets/logo.png $DEB_DIR/usr/share/icons/hicolor/256x256/apps/gettic.png
           fi
           
-          # Control dosyası
           cat > $DEB_DIR/DEBIAN/control << 'EOF'
           Package: gettic
           Version: 1.1.0
@@ -380,14 +372,12 @@ jobs:
           Maintainer: darking053 <support@gettic.app>
           Description: Gettic - Gizlilik odaklı mesajlaşma uygulaması
            Modern, hızlı ve güvenli mesajlaşma deneyimi.
-          Depends: libgtk-3-0, libblkid1, liblzma5
+          Depends: libgtk-3-0, libblkid1, liblzma5, libsecret-1-0
           EOF
           
-          # İzinler
           chmod 755 $DEB_DIR/DEBIAN
           chmod 644 $DEB_DIR/DEBIAN/control
           
-          # .deb oluştur
           dpkg-deb --build $DEB_DIR gettic-linux-amd64.deb
           
           ls -lh gettic-linux-amd64.deb
