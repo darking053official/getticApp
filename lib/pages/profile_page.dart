@@ -1,138 +1,311 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:image_picker/image_picker.dart';
 import '../core/theme.dart';
+import '../core/constants.dart';
+import '../core/utils.dart';
 import '../models/profile.dart';
 import '../services/supabase_service.dart';
+import '../services/storage_service.dart';
 
-class ProfilePage extends ConsumerStatefulWidget {
+class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
-
   @override
-  ConsumerState<ProfilePage> createState() => _ProfilePageState();
+  State<ProfilePage> createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends ConsumerState<ProfilePage> {
+class _ProfilePageState extends State<ProfilePage> {
   final _service = SupabaseService();
+  final _storage = StorageService();
   final _usernameController = TextEditingController();
   final _statusController = TextEditingController();
-  
-  bool _isLoading = true;
-  bool _isSaving = false;
-  Profile? _profile;
+  final _bioController = TextEditingController();
+  final _picker = ImagePicker();
 
-  // Gizlilik Ayarları (Switch State'leri)
-  bool _showOnlineStatus = true;
+  Profile? _profile;
+  File? _localAvatar;
+  bool _isLoading = true;
+  bool _isUploadingAvatar = false;
+  bool _isSaving = false;
+
+  // Gizlilik
+  bool _showOnline = true;
   bool _showLastSeen = true;
+  bool _showReadReceipts = true;
+  bool _muteNotifications = false;
+
+  // İstatistikler
+  int _totalMessages = 0;
+  int _totalConversations = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    _load();
   }
 
-  Future<void> _loadProfile() async {
+  Future<void> _load() async {
     try {
-      // ✅ getProfile zaten Profile nesnesi döndürüyor
-      final profile = await _service.getMyProfile();
-      
+      final p = await _service.getMyProfile();
       if (mounted) {
-        if (profile != null) {
-          setState(() {
-            _profile = profile;
-            _usernameController.text = profile.username;
-            _statusController.text = profile.status ?? '';
-            _showOnlineStatus = profile.showOnlineStatus;
-            _showLastSeen = profile.showLastSeen;
-            _isLoading = false;
-          });
-        } else {
-          setState(() => _isLoading = false);
-        }
+        setState(() {
+          _profile = p;
+          _usernameController.text = p?.username ?? '';
+          _statusController.text = p?.status ?? '';
+          _bioController.text = p?.fullName ?? '';
+          _showOnline = p?.showOnlineStatus ?? true;
+          _showLastSeen = p?.showLastSeen ?? true;
+          _isLoading = false;
+        });
+        _loadStats();
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Profil yüklenemedi: $e')),
-        );
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadStats() async {
+    try {
+      final userId = _service.currentUser?.id;
+      if (userId == null) return;
+
+      // Toplam sohbet
+      final members = await _service.getMyConversationsWithUnread();
+      final conversationsCount = members.length;
+
+      // Toplam mesaj (kendi gönderdiği)
+      int messagesCount = 0;
+      for (final m in members) {
+        final msgs = await _service.getMessages(m['conversation_id']);
+        messagesCount += msgs.where((msg) => msg.senderId == userId).length;
       }
+
+      if (mounted) {
+        setState(() {
+          _totalConversations = conversationsCount;
+          _totalMessages = messagesCount;
+        });
+      }
+    } catch (e) {
+      print('İstatistik hatası: $e');
+    }
+  }
+
+  Future<void> _pickAvatar() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(width: 40, height: 4, decoration: BoxDecoration(
+              color: AppTheme.inputBorder, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            const Text('Profil Fotoğrafı',
+                style: TextStyle(color: AppTheme.textPrimary,
+                    fontSize: 17, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: AppTheme.primary),
+              title: const Text('Galeriden Seç',
+                  style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined, color: AppTheme.primary),
+              title: const Text('Kamera ile Çek',
+                  style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            if (_profile?.avatarUrl != null)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                title: const Text('Fotoğrafı Kaldır',
+                    style: TextStyle(color: Colors.redAccent)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _removeAvatar();
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return;
+
+    try {
+      final picked = await _picker.pickImage(
+        source: source,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+
+      setState(() {
+        _localAvatar = File(picked.path);
+        _isUploadingAvatar = true;
+      });
+
+      final userId = _service.currentUser?.id;
+      if (userId == null) return;
+
+      final url = await _storage.uploadAvatar(File(picked.path), userId);
+
+      if (url != null) {
+        await _service.updateProfile(userId, {'avatar_url': url});
+        await _load();
+        _snack('Profil fotoğrafı güncellendi ✓');
+      } else {
+        _snack('Yükleme başarısız', isError: true);
+      }
+    } catch (e) {
+      _snack('Hata: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isUploadingAvatar = false);
+    }
+  }
+
+  Future<void> _removeAvatar() async {
+    final confirm = await _confirm(
+      title: 'Fotoğrafı Kaldır',
+      content: 'Profil fotoğrafın kaldırılsın mı?',
+      confirm: 'Kaldır',
+      isDanger: true,
+    );
+    if (confirm != true) return;
+
+    try {
+      final userId = _service.currentUser?.id;
+      if (userId == null) return;
+      await _service.updateProfile(userId, {'avatar_url': null});
+      await _load();
+      _snack('Fotoğraf kaldırıldı ✓');
+    } catch (e) {
+      _snack('Hata: $e', isError: true);
     }
   }
 
   Future<void> _saveProfile() async {
-    final userId = _service.currentUser?.id;
-    if (userId == null) return;
-
-    final newUsername = _usernameController.text.trim();
-    if (newUsername.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Kullanıcı adı boş olamaz.')),
-      );
+    final username = _usernameController.text.trim();
+    if (username.isEmpty) {
+      _snack('Kullanıcı adı boş olamaz', isError: true);
+      return;
+    }
+    if (username.length < 3) {
+      _snack('Kullanıcı adı en az 3 karakter olmalı', isError: true);
       return;
     }
 
     setState(() => _isSaving = true);
-
     try {
-      final updates = {
-        'username': newUsername,
+      final userId = _service.currentUser?.id;
+      if (userId == null) return;
+
+      await _service.updateProfile(userId, {
+        'username': username,
         'status': _statusController.text.trim(),
-        'show_online_status': _showOnlineStatus,
+        'full_name': _bioController.text.trim(),
+        'show_online_status': _showOnline,
         'show_last_seen': _showLastSeen,
         'updated_at': DateTime.now().toIso8601String(),
-      };
+      });
 
-      await _service.updateProfile(userId, updates);
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Profil başarıyla güncellendi.'),
-            backgroundColor: AppTheme.primary,
-          ),
-        );
-      }
+      await _load();
+      _snack('Profil güncellendi ✓');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Güncelleme başarısız: $e')),
-        );
-      }
+      _snack('Hata: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  // Gizlilik switch'leri değiştiğinde anında veritabanına yaz
-  Future<void> _togglePrivacy(String field, bool value) async {
-    setState(() {
-      if (field == 'show_online_status') _showOnlineStatus = value;
-      if (field == 'show_last_seen') _showLastSeen = value;
-    });
+  Future<void> _shareProfile() async {
+    final username = _profile?.username ?? '';
+    await Clipboard.setData(ClipboardData(
+      text: 'Gettic\'te beni bul: @$username\nhttps://gettic.dpdns.org',
+    ));
+    _snack('Profil linki kopyalandı ✓');
+  }
 
-    final userId = _service.currentUser?.id;
-    if (userId != null) {
-      try {
-        // ✅ Servis fonksiyonumuzla uyumlu hale getirildi
-        await _service.updateProfile(userId, {field: value});
-      } catch (e) {
-        // Hata durumunda eski haline getir
-        setState(() {
-          if (field == 'show_online_status') _showOnlineStatus = !value;
-          if (field == 'show_last_seen') _showLastSeen = !value;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Gizlilik ayarı kaydedilemedi.')),
-        );
-      }
-    }
+  void _showFullAvatar() {
+    if (_profile?.avatarUrl == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              child: Center(
+                child: CachedNetworkImage(
+                  imageUrl: _profile!.avatarUrl!,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            Positioned(
+              top: 40, right: 20,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _snack(String msg, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: isError ? Colors.redAccent : AppTheme.primary,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<bool?> _confirm({
+    required String title,
+    required String content,
+    required String confirm,
+    bool isDanger = false,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text(title, style: const TextStyle(color: AppTheme.textPrimary)),
+        content: Text(content, style: const TextStyle(color: AppTheme.textSecondary)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false),
+              child: const Text('İptal', style: TextStyle(color: AppTheme.textSecondary))),
+          TextButton(onPressed: () => Navigator.pop(c, true),
+              child: Text(confirm, style: TextStyle(
+                  color: isDanger ? Colors.redAccent : AppTheme.primary))),
+        ],
+      ),
+    );
   }
 
   @override
   void dispose() {
     _usernameController.dispose();
     _statusController.dispose();
+    _bioController.dispose();
     super.dispose();
   }
 
@@ -147,198 +320,413 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Profil & Ayarlar'),
-        backgroundColor: AppTheme.background,
-        elevation: 0,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // --- AVATAR ALANI ---
-            Stack(
-              children: [
-                CircleAvatar(
-                  radius: 50,
-                  backgroundColor: AppTheme.surface,
-                  backgroundImage: _profile?.avatarUrl != null
-                      ? CachedNetworkImageProvider(_profile!.avatarUrl!)
-                      : null,
-                  child: _profile?.avatarUrl == null
-                      ? Text(
-                          (_profile?.username.isNotEmpty ?? false)
-                              ? _profile!.username[0].toUpperCase()
-                              : '?',
-                          style: const TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primary,
-                          ),
-                        )
-                      : null,
+      body: CustomScrollView(
+        slivers: [
+          // AppBar (avatar ortalanmış)
+          SliverAppBar(
+            expandedHeight: 220,
+            pinned: true,
+            backgroundColor: AppTheme.background,
+            elevation: 0,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.share_outlined),
+                onPressed: _shareProfile,
+              ),
+            ],
+            flexibleSpace: FlexibleSpaceBar(
+              background: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primary.withOpacity(0.4),
+                      AppTheme.background,
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
                 ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: GestureDetector(
-                    onTap: () {
-                      // TODO: StorageService ile avatar yükleme işlemi buraya gelecek
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Avatar yükleme özelliği yakında.')),
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: const BoxDecoration(
-                        color: AppTheme.primary,
-                        shape: BoxShape.circle,
+                child: SafeArea(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 20),
+                      GestureDetector(
+                        onTap: _showFullAvatar,
+                        child: Stack(
+                          children: [
+                            Container(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: AppTheme.primary, width: 3),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppTheme.primary.withOpacity(0.3),
+                                    blurRadius: 20,
+                                    spreadRadius: 4,
+                                  ),
+                                ],
+                              ),
+                              child: CircleAvatar(
+                                radius: 55,
+                                backgroundColor: AppTheme.surface,
+                                backgroundImage: _localAvatar != null
+                                    ? FileImage(_localAvatar!)
+                                    : (_profile?.avatarUrl != null
+                                        ? CachedNetworkImageProvider(
+                                            _profile!.avatarUrl!)
+                                        : null) as ImageProvider?,
+                                child: (_localAvatar == null &&
+                                        _profile?.avatarUrl == null)
+                                    ? Text(
+                                        _profile!.username.isNotEmpty
+                                            ? _profile!.username[0].toUpperCase()
+                                            : '?',
+                                        style: const TextStyle(
+                                          fontSize: 40,
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      )
+                                    : null,
+                              ),
+                            ),
+                            Positioned(
+                              bottom: 0, right: 0,
+                              child: GestureDetector(
+                                onTap: _isUploadingAvatar ? null : _pickAvatar,
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primary,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                        color: AppTheme.background, width: 2),
+                                  ),
+                                  child: _isUploadingAvatar
+                                      ? const SizedBox(
+                                          width: 16, height: 16,
+                                          child: CircularProgressIndicator(
+                                              color: Colors.white,
+                                              strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.camera_alt,
+                                          size: 18, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      child: const Icon(Icons.camera_alt, size: 18, color: Colors.white),
-                    ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _profile?.username ?? '',
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.verified,
+                              color: AppTheme.primary, size: 20),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '@${_profile?.username ?? ''}',
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            
-            // ✅ Email yerine username gösteriliyor (profiles tablosunda email yok)
-            Text(
-              '@${_profile?.username ?? "kullanici"}',
-              style: const TextStyle(
-                color: AppTheme.textSecondary, 
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
               ),
             ),
-            const SizedBox(height: 32),
+          ),
 
-            // --- KİŞİSEL BİLGİLER KARTI ---
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.inputBorder),
-              ),
+          // İçerik
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Kişisel Bilgiler',
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                  // Bio
+                  if (_profile?.fullName != null &&
+                      _profile!.fullName!.isNotEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppTheme.inputBorder),
+                      ),
+                      child: Text(
+                        _profile!.fullName!,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 14,
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
+
+                  // İstatistikler
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.inputBorder),
+                    ),
+                    child: Row(
+                      children: [
+                        _statItem('$_totalConversations', 'Sohbet'),
+                        _statDivider(),
+                        _statItem('$_totalMessages', 'Mesaj'),
+                        _statDivider(),
+                        _statItem('_', 'Arkadaş'),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _usernameController,
-                    style: const TextStyle(color: AppTheme.textPrimary),
-                    decoration: const InputDecoration(
-                      labelText: 'Kullanıcı Adı',
-                      labelStyle: TextStyle(color: AppTheme.textSecondary),
-                      prefixIcon: Icon(Icons.person_outline, color: AppTheme.textSecondary),
+
+                  const SizedBox(height: 20),
+
+                  // Kişisel Bilgiler
+                  _sectionHeader('KİŞİSEL BİLGİLER'),
+                  _card([
+                    _textField(
+                      controller: _usernameController,
+                      icon: Icons.alternate_email,
+                      label: 'Kullanıcı Adı',
+                      hint: 'kullanici_adi',
+                    ),
+                    _divider(),
+                    _textField(
+                      controller: _statusController,
+                      icon: Icons.mood_outlined,
+                      label: 'Durum',
+                      hint: 'Örn: Kod yazıyorum...',
+                    ),
+                    _divider(),
+                    _textField(
+                      controller: _bioController,
+                      icon: Icons.info_outline,
+                      label: 'Hakkımda',
+                      hint: 'Kendinden bahset...',
+                      maxLines: 3,
+                    ),
+                  ]),
+
+                  const SizedBox(height: 20),
+
+                  // Gizlilik
+                  _sectionHeader('GİZLİLİK'),
+                  _card([
+                    _switchTile(
+                      icon: Icons.visibility_outlined,
+                      title: 'Çevrimiçi durumumu göster',
+                      subtitle: 'Kapalıyken çevrimiçi görünmezsin',
+                      value: _showOnline,
+                      onChanged: (v) => setState(() => _showOnline = v),
+                    ),
+                    _divider(),
+                    _switchTile(
+                      icon: Icons.access_time,
+                      title: 'Son görülmemi göster',
+                      subtitle: 'Son görülme zamanın gizlenir',
+                      value: _showLastSeen,
+                      onChanged: (v) => setState(() => _showLastSeen = v),
+                    ),
+                    _divider(),
+                    _switchTile(
+                      icon: Icons.done_all,
+                      title: 'Okundu bilgisi',
+                      subtitle: 'Mavi tikler gösterilsin mi?',
+                      value: _showReadReceipts,
+                      onChanged: (v) => setState(() => _showReadReceipts = v),
+                    ),
+                    _divider(),
+                    _switchTile(
+                      icon: Icons.notifications_off_outlined,
+                      title: 'Bildirimleri Sessize Al',
+                      subtitle: 'Tüm bildirimleri kapat',
+                      value: _muteNotifications,
+                      onChanged: (v) => setState(() => _muteNotifications = v),
+                    ),
+                  ]),
+
+                  const SizedBox(height: 24),
+
+                  // Kaydet Butonu
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _isSaving ? null : _saveProfile,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: _isSaving
+                          ? const SizedBox(
+                              width: 22, height: 22,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2),
+                            )
+                          : const Text(
+                              'Değişiklikleri Kaydet',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w600),
+                            ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _statusController,
-                    style: const TextStyle(color: AppTheme.textPrimary),
-                    decoration: const InputDecoration(
-                      labelText: 'Durum (İsteğe bağlı)',
-                      hintText: 'Örn: Kod yazıyorum...',
-                      labelStyle: TextStyle(color: AppTheme.textSecondary),
-                      prefixIcon: Icon(Icons.info_outline, color: AppTheme.textSecondary),
+
+                  const SizedBox(height: 20),
+
+                  // Hesap Bilgileri
+                  Center(
+                    child: Text(
+                      'Hesap oluşturma: ${_formatDate(_service.currentUser?.createdAt)}',
+                      style: const TextStyle(
+                          color: AppTheme.textSecondary, fontSize: 12),
                     ),
                   ),
+
+                  const SizedBox(height: 30),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
+          ),
+        ],
+      ),
+    );
+  }
 
-            // --- GİZLİLİK AYARLARI KARTI ---
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.inputBorder),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Gizlilik',
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text(
-                      'Çevrimiçi durumumu göster',
-                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-                    ),
-                    subtitle: const Text(
-                      'Kapalıysa kimse çevrimiçi olduğunuzu göremez.',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                    ),
-                    activeColor: AppTheme.primary,
-                    value: _showOnlineStatus,
-                    onChanged: (val) => _togglePrivacy('show_online_status', val),
-                  ),
-                  const Divider(color: AppTheme.inputBorder),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text(
-                      'Son görülmemi göster',
-                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-                    ),
-                    subtitle: const Text(
-                      'Kapalıysa son görülme zamanınız gizlenir.',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                    ),
-                    activeColor: AppTheme.primary,
-                    value: _showLastSeen,
-                    onChanged: (val) => _togglePrivacy('show_last_seen', val),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 32),
+  String _formatDate(String? iso) {
+    if (iso == null) return 'Bilinmiyor';
+    try {
+      final d = DateTime.parse(iso);
+      return '${d.day}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+    } catch (_) {
+      return 'Bilinmiyor';
+    }
+  }
 
-            // --- KAYDET BUTONU ---
-            ElevatedButton(
-              onPressed: _isSaving ? null : _saveProfile,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 52),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: _isSaving
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                    )
-                  : const Text(
-                      'Değişiklikleri Kaydet',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                    ),
-            ),
-            const SizedBox(height: 40),
-          ],
+  Widget _sectionHeader(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: AppTheme.primary,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.5,
         ),
       ),
+    );
+  }
+
+  Widget _card(List<Widget> children) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.inputBorder),
+      ),
+      child: Column(children: children),
+    );
+  }
+
+  Widget _textField({
+    required TextEditingController controller,
+    required IconData icon,
+    required String label,
+    required String hint,
+    int maxLines = 1,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: TextField(
+        controller: controller,
+        maxLines: maxLines,
+        style: const TextStyle(color: AppTheme.textPrimary),
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          labelStyle: const TextStyle(color: AppTheme.textSecondary),
+          hintStyle: TextStyle(color: AppTheme.textSecondary.withOpacity(0.5)),
+          prefixIcon: Icon(icon, color: AppTheme.textSecondary, size: 20),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          filled: false,
+        ),
+      ),
+    );
+  }
+
+  Widget _switchTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return SwitchListTile(
+      secondary: Icon(icon, color: AppTheme.textSecondary, size: 22),
+      title: Text(title,
+          style: const TextStyle(
+              color: AppTheme.textPrimary, fontSize: 15,
+              fontWeight: FontWeight.w500)),
+      subtitle: Text(subtitle,
+          style: const TextStyle(
+              color: AppTheme.textSecondary, fontSize: 12)),
+      value: value,
+      activeColor: AppTheme.primary,
+      onChanged: onChanged,
+    );
+  }
+
+  Widget _divider() =>
+      const Divider(color: AppTheme.inputBorder, height: 1, indent: 56);
+
+  Widget _statItem(String value, String label) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(value,
+              style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(label,
+              style: const TextStyle(
+                  color: AppTheme.textSecondary, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  Widget _statDivider() {
+    return Container(
+      width: 1,
+      height: 30,
+      color: AppTheme.inputBorder,
     );
   }
 }
