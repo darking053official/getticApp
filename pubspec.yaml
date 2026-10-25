@@ -11,20 +11,13 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.6
   
-  # --- Backend & Auth ---
   supabase_flutter: ^2.5.0
   flutter_secure_storage: ^9.0.0
-  
-  # --- UI & Utilities ---
   intl: ^0.19.0
   cached_network_image: ^3.3.1
   image_picker: ^1.1.2
   emoji_picker_flutter: ^2.1.1
-  
-  # --- State Management ---
   flutter_riverpod: ^2.5.1
-
-  # --- Platform Uyumluluğu ---
   shared_preferences: 2.2.3
   path_provider: 2.1.4
 
