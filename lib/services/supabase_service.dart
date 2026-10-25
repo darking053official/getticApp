@@ -196,6 +196,12 @@ class SupabaseService {
     return convId;
   }
 
+  Future<void> deleteConversation(String conversationId) async {
+  if (currentUser == null) return;
+  await _client.from(AppConstants.tableConversations)
+      .delete().eq('id', conversationId);
+  }
+
   // ==========================================
   // MESAJLAR
   // ==========================================
