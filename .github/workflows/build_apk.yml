@@ -1,1 +1,128 @@
+name: Build Gettic APK
 
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. Kodu al
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # 2. Java 17 kurulumu
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      
+      # 3. Flutter 3.19.2 kurulumu
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.2'
+          channel: 'stable'
+          cache: true
+      
+      # 4. Flutter projesini hazırla (Android klasörü yoksa oluştur)
+      - name: Ensure Flutter project structure
+        run: flutter create . --project-name gettic --org com.gettic --platforms=android
+      
+      # 5. Uygulama ID'sini ayarla
+      - name: Set Application ID
+        run: |
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i 's/applicationId ".*"/applicationId "gettic.by.darking053"/' android/app/build.gradle
+          fi
+          if [ -f "android/app/build.gradle.kts" ]; then
+            sed -i 's/applicationId = ".*"/applicationId = "gettic.by.darking053"/' android/app/build.gradle.kts
+          fi
+          echo "📦 Uygulama ID'si:"
+          grep -r "applicationId" android/app/ | head -5
+      
+      # 6. TÜM İZİNLERİ EKLE (İnternet + Kamera + Depolama)
+      - name: Add All Permissions to Manifest
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            # INTERNET
+            if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
+              sed -i '/<manifest /a \    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+              echo "✅ INTERNET izni eklendi"
+            fi
+            # CAMERA
+            if ! grep -q "android.permission.CAMERA" "$MANIFEST"; then
+              sed -i '/<manifest /a \    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
+              echo "✅ CAMERA izni eklendi"
+            fi
+            # READ_EXTERNAL_STORAGE (Android 12 ve altı)
+            if ! grep -q "android.permission.READ_EXTERNAL_STORAGE" "$MANIFEST"; then
+              sed -i '/<manifest /a \    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' "$MANIFEST"
+              echo "✅ READ_EXTERNAL_STORAGE izni eklendi"
+            fi
+            # READ_MEDIA_IMAGES (Android 13+)
+            if ! grep -q "android.permission.READ_MEDIA_IMAGES" "$MANIFEST"; then
+              sed -i '/<manifest /a \    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />' "$MANIFEST"
+              echo "✅ READ_MEDIA_IMAGES izni eklendi"
+            fi
+            # WRITE_EXTERNAL_STORAGE (Android 9 ve altı için)
+            if ! grep -q "android.permission.WRITE_EXTERNAL_STORAGE" "$MANIFEST"; then
+              sed -i '/<manifest /a \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />' "$MANIFEST"
+              echo "✅ WRITE_EXTERNAL_STORAGE izni eklendi"
+            fi
+            
+            echo ""
+            echo "📋 Manifest ilk 15 satır:"
+            head -15 "$MANIFEST"
+          fi
+      
+      # 7. Uygulama adını "Gettic" yap
+      - name: Set App Name to Gettic
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
+            echo "✅ Uygulama adı Gettic olarak ayarlandı"
+          fi
+      
+      # 8. Bağımlılıkları yükle
+      - name: Get Dependencies
+        run: flutter pub get
+      
+      # 9. Logo ve ikonları uygula
+      - name: Apply Launcher Icons
+        run: dart run flutter_launcher_icons
+        continue-on-error: true
+      
+      # 10. Splash Screen
+      - name: Apply Splash Screen
+        run: dart run flutter_native_splash:create
+        continue-on-error: true
+      
+      # 11. Kod analizi
+      - name: Flutter Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        continue-on-error: true
+      
+      # 12. Release APK üret
+      - name: Build Release APK
+        run: flutter build apk --release --split-per-abi
+      
+      # 13. Üretilen dosyaları listele
+      - name: List Generated APKs
+        run: |
+          echo "📦 Üretilen APK dosyaları:"
+          ls -lh build/app/outputs/flutter-apk/
+      
+      # 14. APK'yı artifact olarak yükle
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gettic-release-apk
+          path: build/app/outputs/flutter-apk/*.apk
+          retention-days: 30
