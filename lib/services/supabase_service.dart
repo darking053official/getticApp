@@ -119,13 +119,12 @@ class SupabaseService {
   }
 
   // ==========================================
-  // SOHBETLER - BASİT SORGULAR
+  // SOHBETLER
   // ==========================================
   Future<List<Map<String, dynamic>>> getMyConversationsWithUnread() async {
     if (currentUser == null) return [];
 
     try {
-      // 1. Kullanıcının üye olduğu conversation_id'leri al
       final members = await _client
           .from(AppConstants.tableConversationMembers)
           .select('conversation_id')
@@ -155,11 +154,19 @@ class SupabaseService {
             .limit(1)
             .maybeSingle();
 
+        // Grup mu? (type 'group' ise is_group = true döner)
+        final convData = await _client
+            .from(AppConstants.tableConversations)
+            .select('type')
+            .eq('id', convId)
+            .maybeSingle();
+
         result.add({
           'conversation_id': convId,
           'other_user': otherMember?['profiles'],
           'last_message': lastMsg,
           'unread_count': 0,
+          'is_group': convData?['type'] == 'group',
         });
       }
 
@@ -196,10 +203,31 @@ class SupabaseService {
     return convId;
   }
 
+  // ✅ GÜNCELLENDİ: Önce mesajları, sonra üyeleri, en son sohbeti sil
   Future<void> deleteConversation(String conversationId) async {
-  if (currentUser == null) return;
-  await _client.from(AppConstants.tableConversations)
-      .delete().eq('id', conversationId);
+    if (currentUser == null) return;
+    try {
+      // 1. Mesajları sil
+      await _client
+          .from(AppConstants.tableMessages)
+          .delete()
+          .eq('conversation_id', conversationId);
+      
+      // 2. Üyeleri sil
+      await _client
+          .from(AppConstants.tableConversationMembers)
+          .delete()
+          .eq('conversation_id', conversationId);
+      
+      // 3. En son sohbeti sil
+      await _client
+          .from(AppConstants.tableConversations)
+          .delete()
+          .eq('id', conversationId);
+    } catch (e) {
+      print('Sohbet silme hatası: $e');
+      rethrow;
+    }
   }
 
   // ==========================================
@@ -234,15 +262,21 @@ class SupabaseService {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
     if (content.trim().isEmpty) throw Exception('Boş mesaj gönderilemez');
 
-    // ✅ BASİT INSERT - Hata varsa exception fırlar
-    final response = await _client.from(AppConstants.tableMessages).insert({
+    await _client.from(AppConstants.tableMessages).insert({
       'conversation_id': conversationId,
       'sender_id': currentUser!.id,
       'content': content.trim(),
       'type': 'text',
-    }).select();
+    });
 
-    print('MESAJ EKLENDİ: $response');
+    // Sohbetin updated_at değerini yenile
+    try {
+      await _client.from(AppConstants.tableConversations).update({
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', conversationId);
+    } catch (e) {
+      print('Sohbet güncelleme hatası: $e');
+    }
   }
 
   // ==========================================
