@@ -33,6 +33,24 @@ jobs:
       - name: Ensure Flutter project structure
         run: flutter create . --project-name gettic --org com.gettic --platforms=android
       
+      # 4.1. KOTLIN SÜRÜMÜNÜ GÜNCELLE (emoji_picker_flutter hatasını çözer)
+      - name: Update Kotlin Version
+        run: |
+          SETTINGS_FILE="android/settings.gradle"
+          if [ -f "$SETTINGS_FILE" ]; then
+            # Kotlin sürümünü 1.9.23'e yükselt
+            sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.23"/' "$SETTINGS_FILE"
+            echo "✅ Kotlin sürümü güncellendi:"
+            grep "org.jetbrains.kotlin.android" "$SETTINGS_FILE"
+          fi
+          # Kotlin DSL (build.gradle.kts) varsa oradaki sürümü de güncelle
+          SETTINGS_KTS_FILE="android/settings.gradle.kts"
+          if [ -f "$SETTINGS_KTS_FILE" ]; then
+            sed -i 's/id("org.jetbrains.kotlin.android") version "[^"]*"/id("org.jetbrains.kotlin.android") version "1.9.23"/' "$SETTINGS_KTS_FILE"
+            echo "✅ Kotlin DSL sürümü güncellendi:"
+            grep "org.jetbrains.kotlin.android" "$SETTINGS_KTS_FILE"
+          fi
+      
       # 5. Uygulama ID'sini ayarla
       - name: Set Application ID
         run: |
@@ -60,17 +78,17 @@ jobs:
               sed -i '/<manifest /a \    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
               echo "✅ CAMERA izni eklendi"
             fi
-            # READ_EXTERNAL_STORAGE (Android 12 ve altı)
+            # READ_EXTERNAL_STORAGE
             if ! grep -q "android.permission.READ_EXTERNAL_STORAGE" "$MANIFEST"; then
               sed -i '/<manifest /a \    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' "$MANIFEST"
               echo "✅ READ_EXTERNAL_STORAGE izni eklendi"
             fi
-            # READ_MEDIA_IMAGES (Android 13+)
+            # READ_MEDIA_IMAGES
             if ! grep -q "android.permission.READ_MEDIA_IMAGES" "$MANIFEST"; then
               sed -i '/<manifest /a \    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />' "$MANIFEST"
               echo "✅ READ_MEDIA_IMAGES izni eklendi"
             fi
-            # WRITE_EXTERNAL_STORAGE (Android 9 ve altı için)
+            # WRITE_EXTERNAL_STORAGE
             if ! grep -q "android.permission.WRITE_EXTERNAL_STORAGE" "$MANIFEST"; then
               sed -i '/<manifest /a \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />' "$MANIFEST"
               echo "✅ WRITE_EXTERNAL_STORAGE izni eklendi"
@@ -109,9 +127,12 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
         continue-on-error: true
       
-      # 12. Release APK üret
-      - name: Build Release APK
-        run: flutter build apk --release --split-per-abi
+      # 12. Release APK üret (Kotlin hatasını önlemek için temizlikle)
+      - name: Clean and Build Release APK
+        run: |
+          flutter clean
+          flutter pub get
+          flutter build apk --release --split-per-abi
       
       # 13. Üretilen dosyaları listele
       - name: List Generated APKs
