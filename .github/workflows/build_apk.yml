@@ -39,6 +39,9 @@ jobs:
           sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
           rm -f test/widget_test.dart
       - run: flutter pub get
+      # ✅ İKON VE SPLASH OLUŞTUR
+      - run: dart run flutter_launcher_icons
+      - run: dart run flutter_native_splash:create
       - run: flutter build apk --release --split-per-abi
       - uses: actions/upload-artifact@v4
         with:
@@ -90,6 +93,8 @@ jobs:
             Set-Content pubspec.yaml -Value $content -NoNewline
           }
           flutter pub get
+      # ✅ İKON OLUŞTUR (Windows)
+      - run: dart run flutter_launcher_icons
       - run: flutter build windows --release
       - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath gettic-windows.zip
       - uses: actions/upload-artifact@v4
@@ -120,6 +125,8 @@ jobs:
             sed -i '' "s/platform :osx, .*/platform :osx, '10.15'/" macos/Podfile
           fi
       - run: flutter pub get
+      # ✅ İKON OLUŞTUR (macOS)
+      - run: dart run flutter_launcher_icons
       - run: flutter build macos --release
       - run: |
           cd build/macos/Build/Products/Release/
@@ -234,8 +241,6 @@ jobs:
               echo "    path: ./fake_file_selector_linux" >> pubspec.yaml
             fi
           fi
-          echo "✅ pubspec.yaml güncellendi"
-          grep -A4 "dependency_overrides" pubspec.yaml
       
       - name: Get Dependencies
         run: flutter pub get
@@ -247,6 +252,10 @@ jobs:
             sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
             echo "✅ -Werror devre dışı bırakıldı"
           fi
+      
+      # ✅ İKON VE SPLASH OLUŞTUR (Linux)
+      - run: dart run flutter_launcher_icons
+      - run: dart run flutter_native_splash:create
       
       - name: Build Linux
         run: |
