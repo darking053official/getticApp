@@ -30,6 +30,14 @@ dependencies:
   flutter_local_notifications: ^17.2.2
   timezone: ^0.9.4
   onesignal_flutter: ^5.2.0
+  file_picker: ^8.0.0        # Dosya (PDF, DOC vb.)
+  record: ^5.2.0             # Sesli mesaj kaydı
+  just_audio: ^0.9.40        # Sesli mesaj oynatma
+  path_provider: 2.1.4       # Geçici dosya yolu
+  mime: ^1.0.6               # MIME type tespiti
+  video_player: ^2.8.6       # Video oynatma
+  chewie: ^1.8.0             # Video kontrolleri (opsiyonel ama güzel)
+  open_filex: ^4.3.4         # Dosya açma (PDF vb. için)
   
 dev_dependencies:
   flutter_test:
