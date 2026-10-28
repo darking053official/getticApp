@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/app_state.dart';
 import '../core/theme.dart';
 import '../models/message.dart';
 import '../models/profile.dart';
@@ -47,6 +48,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   @override
   void initState() {
     super.initState();
+    
+    // ✅ AppState: Bu sohbeti aktif olarak işaretle (bildirimleri engelle)
+    AppState().setActiveConversation(widget.conversationId);
+    
     _messagesStream = _service.streamMessages(widget.conversationId);
     _subscribeToMessages();
     _subscribeToTyping();
@@ -316,6 +321,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   @override
   void dispose() {
+    // ✅ AppState: Bu sohbetten çıkıldı, bildirimlere tekrar izin ver
+    AppState().clearActiveConversation();
+    
     _typingTimer?.cancel();
     _typingDebounce?.cancel();
     _messagesSubscription?.cancel();
