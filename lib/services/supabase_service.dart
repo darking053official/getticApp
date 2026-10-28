@@ -8,6 +8,9 @@ class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
   final Map<String, RealtimeChannel> _typingChannels = {};
 
+  // ==========================================
+  // GETTERS
+  // ==========================================
   User? get currentUser => _client.auth.currentUser;
   Stream<AuthState> get authStateChanges => _client.auth.onAuthStateChange;
 
@@ -89,7 +92,10 @@ class SupabaseService {
   }
 
   Future<void> updateProfile(String userId, Map<String, dynamic> updates) async {
-    await _client.from(AppConstants.tableProfiles).update(updates).eq('id', userId);
+    await _client
+        .from(AppConstants.tableProfiles)
+        .update(updates)
+        .eq('id', userId);
   }
 
   Future<void> updatePrivacySettings({
@@ -166,12 +172,12 @@ class SupabaseService {
           'conversation_id': convId,
           'other_user': otherMember?['profiles'],
           'last_message': lastMsg,
-          'unread_count': 0, 
+          'unread_count': 0,
           'is_group': convData?['type'] == 'group',
         });
       }
 
-      // Son mesaja göre sırala (En yeni en üstte)
+      // Son mesaja göre sırala
       result.sort((a, b) {
         final aDate = a['last_message']?['created_at'] ?? '2000-01-01';
         final bDate = b['last_message']?['created_at'] ?? '2000-01-01';
@@ -204,7 +210,6 @@ class SupabaseService {
     return convId;
   }
 
-  /// Sohbeti ve içindeki tüm mesaj/üyeleri güvenli bir şekilde siler.
   Future<void> deleteConversation(String conversationId) async {
     if (currentUser == null) return;
     try {
@@ -215,6 +220,50 @@ class SupabaseService {
       print('Sohbet silme hatası: $e');
       rethrow;
     }
+  }
+
+  // ==========================================
+  // GRUP YÖNETİMİ (YENİ)
+  // ==========================================
+  Future<List<Profile>> getGroupMembers(String conversationId) async {
+    try {
+      final data = await _client
+          .from(AppConstants.tableConversationMembers)
+          .select('user_id, profiles(*)')
+          .eq('conversation_id', conversationId);
+      
+      return (data as List)
+          .where((e) => e['profiles'] != null)
+          .map((e) => Profile.fromJson(e['profiles']))
+          .toList();
+    } catch (e) {
+      print('Grup üyeleri çekilemedi: $e');
+      return [];
+    }
+  }
+
+  Future<void> updateGroupName(String conversationId, String newName) async {
+    await _client
+        .from(AppConstants.tableConversations)
+        .update({'name': newName})
+        .eq('id', conversationId);
+  }
+
+  Future<void> removeGroupMember(String conversationId, String userId) async {
+    await _client
+        .from(AppConstants.tableConversationMembers)
+        .delete()
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId);
+  }
+
+  Future<void> addGroupMembers(String conversationId, List<String> userIds) async {
+    final List<Map<String, dynamic>> inserts = userIds.map((uid) => {
+      'conversation_id': conversationId,
+      'user_id': uid,
+    }).toList();
+    
+    await _client.from(AppConstants.tableConversationMembers).insert(inserts);
   }
 
   // ==========================================
@@ -257,7 +306,6 @@ class SupabaseService {
       if (replyToId != null) 'reply_to': replyToId,
     });
 
-    // Sohbetin son güncellenme tarihini yenile (Listede en üste çıkması için)
     try {
       await _client.from(AppConstants.tableConversations).update({
         'updated_at': DateTime.now().toIso8601String(),
@@ -267,7 +315,6 @@ class SupabaseService {
     }
   }
 
-  /// Mesajı siler (Soft Delete - "Bu mesaj silindi" yazar)
   Future<void> deleteMessage(String messageId) async {
     if (currentUser == null) return;
     await _client.from(AppConstants.tableMessages).update({
@@ -277,7 +324,6 @@ class SupabaseService {
     }).eq('id', messageId);
   }
 
-  /// Mesajı düzenler
   Future<void> editMessage(String messageId, String newContent) async {
     if (currentUser == null) return;
     if (newContent.trim().isEmpty) throw Exception('Boş mesaj olamaz');
@@ -289,7 +335,7 @@ class SupabaseService {
   }
 
   // ==========================================
-  // OKUNDU BİLGİSİ (READ RECEIPTS)
+  // OKUNDU BİLGİSİ
   // ==========================================
   Future<void> markMessageAsRead(String messageId, String conversationId) async {
     if (currentUser == null) return;
