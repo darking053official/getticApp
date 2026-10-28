@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/constants.dart';
@@ -12,24 +13,44 @@ final authStateProvider = StreamProvider<AuthState>((ref) {
   return Supabase.instance.client.auth.onAuthStateChange;
 });
 
+// ==========================================
+// ONESIGNAL APP ID
+// ==========================================
+const String oneSignalAppId = "87e2dd8a-b811-49f7-b637-589f3a74d6fe";
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Türkçe tarih formatları
   await initializeDateFormatting('tr_TR', null);
 
+  // Supabase başlat
   await Supabase.initialize(
     url: AppConstants.supabaseUrl,
     anonKey: AppConstants.supabaseAnonKey,
   );
 
+  // Google Auth callback (web için)
   final uri = Uri.base;
   final code = uri.queryParameters['code'];
-  
   if (code != null && code.isNotEmpty) {
     try {
       await Supabase.instance.client.auth.exchangeCodeForSession(code);
     } catch (e) {
       debugPrint('Auth callback hatası: $e');
     }
+  }
+
+  // OneSignal başlat
+  OneSignal.initialize(oneSignalAppId);
+  
+  // Bildirim izni iste (Android 13+ ve iOS için)
+  OneSignal.Notifications.requestPermission(true);
+
+  // Kullanıcı oturum açtıysa OneSignal'a tanıt
+  final currentUser = Supabase.instance.client.auth.currentUser;
+  if (currentUser != null) {
+    OneSignal.login(currentUser.id);
   }
 
   runApp(const ProviderScope(child: GetticApp()));
@@ -58,38 +79,40 @@ class AuthWrapper extends ConsumerStatefulWidget {
 
 class _AuthWrapperState extends ConsumerState<AuthWrapper> {
   bool _showSplash = true;
-  bool _hasSession = false;
 
   @override
   void initState() {
     super.initState();
-    // 1.5 saniyelik yapay bekleme süresi (Splash süresi)
-    // Süre bitince direkt yönlendirmeyi yap.
+    
+    // 1.5 saniyelik splash göster, sonra yönlendir
     Future.delayed(const Duration(milliseconds: 1500), () {
-      if (mounted) {
-        setState(() {
-          _showSplash = false;
-          // Supabase'den son oturum bilgisini oku
-          _hasSession = Supabase.instance.client.auth.currentSession != null;
-        });
+      if (mounted) setState(() => _showSplash = false);
+    });
+
+    // Auth state değiştiğinde OneSignal'ı güncelle
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
+      if (event == AuthChangeEvent.signedIn) {
+        final userId = data.session?.user.id;
+        if (userId != null) {
+          OneSignal.login(userId);
+        }
+      } else if (event == AuthChangeEvent.signedOut) {
+        OneSignal.logout();
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Riverpod ile giriş/çıkış durumlarını dinle
     final authStateAsync = ref.watch(authStateProvider);
 
-    // Eğer yapay splash süresi bitmediyse Splash ekranını göster
     if (_showSplash) {
       return const SplashScreen();
     }
 
-    // Splash bittiyse ve yeni bir Auth durumu değişikliği olduysa
-    // Stream'den gelen veriye göre yönlendir.
     return authStateAsync.when(
-      loading: () => const SplashScreen(), // Stream yüklenirken splash
+      loading: () => const SplashScreen(),
       error: (error, stackTrace) => Scaffold(
         backgroundColor: AppTheme.background,
         body: Center(
@@ -111,7 +134,6 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
   }
 }
 
-// ✅ Şık bir Splash (Yükleme) Ekranı
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
 
@@ -123,7 +145,6 @@ class SplashScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Logo (assets klasöründe olduğundan emin ol)
             Image.asset(
               'assets/logo.png',
               width: 100,
