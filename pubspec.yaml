@@ -27,18 +27,19 @@ dependencies:
   # --- Platform Uyumluluğu ---
   shared_preferences: 2.2.3
   path_provider: 2.1.4
-  flutter_local_notifications: ^17.2.2
-  timezone: ^0.9.4
-  onesignal_flutter: ^5.2.0
-  file_picker: ^8.0.0        # Dosya (PDF, DOC vb.)
-  record: ^5.2.0             # Sesli mesaj kaydı
-  just_audio: ^0.9.40        # Sesli mesaj oynatma
-  path_provider: 2.1.4       # Geçici dosya yolu
-  mime: ^1.0.6               # MIME type tespiti
-  video_player: ^2.8.6       # Video oynatma
-  chewie: ^1.8.0             # Video kontrolleri (opsiyonel ama güzel)
-  open_filex: ^4.3.4         # Dosya açma (PDF vb. için)
-  
+
+  # --- Push Notification (OneSignal) ---
+  onesignal_flutter: ^5.6.8
+
+  # --- Medya Paylaşımı ---
+  file_picker: ^8.0.0
+  record: ^5.2.0
+  just_audio: ^0.9.40
+  mime: ^1.0.6
+  video_player: ^2.8.6
+  chewie: ^1.8.0
+  open_filex: ^4.3.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -50,7 +51,7 @@ flutter_launcher_icons:
   android: "ic_launcher"
   ios: false
   image_path: "assets/logo.png"
-  min_sdk_android: 21
+  min_sdk_android: 23
   adaptive_icon_background: "#0a0a0f"
   adaptive_icon_foreground: "assets/logo.png"
   windows:
@@ -83,11 +84,7 @@ flutter:
     - assets/github.png
     - assets/qr.png
 
-# ==========================================
-# PLATFORM BUILD UYUMLULUĞU (dependency_overrides)
-# ==========================================
 dependency_overrides:
-  # R8 "sealed class" hatasını çözmek için record paketleri
   record: 5.1.0
   record_android: 1.2.1
   record_platform_interface: 1.0.2
