@@ -30,8 +30,12 @@ class AppConstants {
 
   // --- DOSYA LİMİTLERİ ---
   static const int maxAvatarSizeMB = 5;
-  static const int maxMediaSizeMB = 25;
+  static const int maxMediaSizeMB = 50;
+  static const int maxVoiceRecordSeconds = 120; // 2 dakika
+
+  // --- İZİN VERİLEN FORMATLAR ---
   static const List<String> allowedImageFormats = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
   static const List<String> allowedVideoFormats = ['mp4', 'mov', 'avi'];
-  static const List<String> allowedDocFormats = ['pdf', 'doc', 'docx', 'txt'];
+  static const List<String> allowedDocFormats = ['pdf', 'doc', 'docx', 'txt', 'xls', 'xlsx', 'ppt', 'pptx'];
+  static const List<String> allowedAudioFormats = ['m4a', 'mp3', 'wav', 'aac'];
 }
