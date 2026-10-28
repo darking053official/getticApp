@@ -161,10 +161,10 @@ class SupabaseService {
             .limit(1)
             .maybeSingle();
 
-        // 3. Sohbet türünü bul (Grup mu?)
+        // 3. Sohbet detaylarını al (isim, tür)
         final convData = await _client
             .from(AppConstants.tableConversations)
-            .select('type')
+            .select('type, name, created_by')
             .eq('id', convId)
             .maybeSingle();
 
@@ -174,6 +174,8 @@ class SupabaseService {
           'last_message': lastMsg,
           'unread_count': 0,
           'is_group': convData?['type'] == 'group',
+          'group_name': convData?['name'],
+          'created_by': convData?['created_by'],
         });
       }
 
@@ -210,6 +212,36 @@ class SupabaseService {
     return convId;
   }
 
+  Future<String> createGroupConversation({
+    required String groupName,
+    required List<String> memberIds,
+  }) async {
+    if (currentUser == null) throw Exception('Giriş yapmalısınız');
+
+    // 1. Grup sohbetini oluştur
+    final conv = await _client
+        .from(AppConstants.tableConversations)
+        .insert({
+          'type': 'group',
+          'name': groupName,
+          'created_by': currentUser!.id
+        })
+        .select('id')
+        .single();
+
+    final convId = conv['id'];
+
+    // 2. Üyeleri ekle (kendisi + seçilenler)
+    final List<Map<String, dynamic>> inserts = [
+      {'conversation_id': convId, 'user_id': currentUser!.id},
+      ...memberIds.map((uid) => {'conversation_id': convId, 'user_id': uid}),
+    ];
+
+    await _client.from(AppConstants.tableConversationMembers).insert(inserts);
+
+    return convId;
+  }
+
   Future<void> deleteConversation(String conversationId) async {
     if (currentUser == null) return;
     try {
@@ -223,7 +255,7 @@ class SupabaseService {
   }
 
   // ==========================================
-  // GRUP YÖNETİMİ (YENİ)
+  // GRUP YÖNETİMİ
   // ==========================================
   Future<List<Profile>> getGroupMembers(String conversationId) async {
     try {
