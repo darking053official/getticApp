@@ -27,10 +27,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   final _service = SupabaseService();
   final _controller = TextEditingController();
   final _scroll = ScrollController();
-  final _searchController = TextEditingController();
 
   List<Message> _messages = [];
-  List<Message> _searchResults = [];
   late Stream<List<Message>> _messagesStream;
   StreamSubscription<List<Message>>? _messagesSubscription;
   RealtimeChannel? _typingChannel;
@@ -42,7 +40,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   bool _isSending = false;
   bool _showScrollToBottom = false;
   bool _showEmoji = false;
-  bool _isSearching = false;
   bool _isLoading = true;
 
   Message? _replyTo;
@@ -172,7 +169,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   void _showMessageOptions(Message msg, bool isMine) {
-    if (msg.isDeleted) return; // Silinen mesaja işlem yapma
+    if (msg.isDeleted) return;
 
     showModalBottomSheet(
       context: context,
@@ -326,7 +323,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     _service.unsubscribeTyping(widget.conversationId);
     _controller.dispose();
     _scroll.dispose();
-    _searchController.dispose();
     super.dispose();
   }
 
@@ -334,7 +330,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: _isSearching ? _buildSearchAppBar() : _buildAppBar(),
+      appBar: _buildAppBar(),
       body: Column(
         children: [
           Expanded(
@@ -342,13 +338,37 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 ? const Center(
                     child: CircularProgressIndicator(color: AppTheme.primary),
                   )
-                : _isSearching
-                    ? _buildSearchResults()
-                    : _buildMessagesList(),
+                : _buildMessagesList(),
           ),
-          if (_replyTo != null && !_isSearching) _buildReplyPreview(),
-          if (!_isSearching) _buildInputBar(),
-          if (_showEmoji && !_isSearching)
+          
+          // ✅ YAZIYOR... BALONCUĞU (Yazma alanının hemen üstünde)
+          if (_isOtherTyping)
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppTheme.inputBorder),
+                  ),
+                  child: const Text(
+                    'yazıyor...',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          if (_replyTo != null) _buildReplyPreview(),
+          _buildInputBar(),
+          if (_showEmoji)
             SizedBox(
               height: 280,
               child: EmojiPicker(
@@ -427,91 +447,26 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                     color: AppTheme.textPrimary,
                   ),
                 ),
-                _isOtherTyping
-                    ? const _TypingIndicator()
-                    : Text(
-                        widget.otherUser.showOnlineStatus
-                            ? 'Çevrimiçi'
-                            : 'Çevrimdışı',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
+                Text(
+                  _isOtherTyping
+                      ? 'yazıyor...'
+                      : (widget.otherUser.showOnlineStatus
+                          ? 'Çevrimiçi'
+                          : 'Çevrimdışı'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _isOtherTyping
+                        ? AppTheme.primary
+                        : AppTheme.textSecondary,
+                    fontStyle:
+                        _isOtherTyping ? FontStyle.italic : FontStyle.normal,
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.search, color: AppTheme.textSecondary),
-          onPressed: () => setState(() => _isSearching = true),
-        ),
-      ],
-    );
-  }
-
-  PreferredSizeWidget _buildSearchAppBar() {
-    return AppBar(
-      backgroundColor: AppTheme.surface,
-      elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
-        onPressed: () => setState(() {
-          _isSearching = false;
-          _searchController.clear();
-          _searchResults.clear();
-        }),
-      ),
-      title: TextField(
-        controller: _searchController,
-        autofocus: true,
-        style: const TextStyle(color: AppTheme.textPrimary),
-        decoration: const InputDecoration(
-          hintText: 'Sohbette ara...',
-          hintStyle: TextStyle(color: AppTheme.textSecondary),
-          border: InputBorder.none,
-        ),
-        onChanged: (v) {
-          if (v.trim().isEmpty) {
-            setState(() => _searchResults = []);
-          } else {
-            setState(() {
-              _searchResults = _messages
-                  .where((m) =>
-                      (m.content ?? '').toLowerCase().contains(v.toLowerCase()))
-                  .toList();
-            });
-          }
-        },
-      ),
-    );
-  }
-
-  Widget _buildSearchResults() {
-    if (_searchResults.isEmpty) {
-      return Center(
-        child: Text(
-          _searchController.text.isEmpty ? 'Aramak için yaz' : 'Sonuç bulunamadı',
-          style: const TextStyle(color: AppTheme.textSecondary),
-        ),
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: _searchResults.length,
-      itemBuilder: (context, i) {
-        final m = _searchResults[i];
-        return ListTile(
-          title: Text(m.content ?? '',
-              style: const TextStyle(color: AppTheme.textPrimary)),
-          subtitle: Text(
-            DateFormat('d MMM, HH:mm', 'tr_TR').format(m.createdAt),
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-          ),
-        );
-      },
     );
   }
 
@@ -669,7 +624,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               ),
             ),
           Text(
-            m.isDeleted ? '🚫 Bu mesaj silindi' : (m.content ?? ''),
+            m.isDeleted ? 'Bu mesaj silindi' : (m.content ?? ''),
             style: TextStyle(
               color: mine ? Colors.white : AppTheme.textPrimary,
               fontSize: 15,
@@ -680,6 +635,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           const SizedBox(height: 4),
           Row(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               if (m.editedAt != null && !m.isDeleted)
                 Text(
@@ -697,14 +653,29 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   color: mine ? Colors.white70 : AppTheme.textSecondary,
                 ),
               ),
-              if (mine && !m.isDeleted) ...[
-                const SizedBox(width: 4),
-                Icon(
-                  m.isRead ? Icons.done_all : Icons.done,
-                  size: 14,
-                  color: m.isRead ? const Color(0xFF60a5fa) : Colors.white70,
+              const SizedBox(width: 4),
+              
+              // ✅ OKUNDU / İLETİLDİ İBARESİ
+              if (mine && !m.isDeleted)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      m.isRead ? Icons.done_all : Icons.done,
+                      size: 14,
+                      color: m.isRead ? const Color(0xFF60a5fa) : Colors.white70,
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      m.isRead ? 'Okundu' : 'İletildi',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: m.isRead ? const Color(0xFF60a5fa) : Colors.white70,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
             ],
           ),
         ],
@@ -863,60 +834,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ==========================================
-// TYPING INDICATOR (Animasyonlu 3 nokta)
-// ==========================================
-class _TypingIndicator extends StatefulWidget {
-  const _TypingIndicator();
-  @override
-  State<_TypingIndicator> createState() => _TypingIndicatorState();
-}
-
-class _TypingIndicatorState extends State<_TypingIndicator>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 900),
-      vsync: this,
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Text('yazıyor',
-            style: TextStyle(
-                fontSize: 12,
-                color: AppTheme.primary,
-                fontStyle: FontStyle.italic)),
-        const SizedBox(width: 4),
-        AnimatedBuilder(
-          animation: _controller,
-          builder: (_, __) {
-            final dots = (_controller.value * 3).floor();
-            return Text('.' * (dots + 1),
-                style: const TextStyle(
-                    fontSize: 14,
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.bold));
-          },
-        ),
-      ],
     );
   }
 }
