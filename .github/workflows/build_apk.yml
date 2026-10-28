@@ -59,7 +59,7 @@ jobs:
           path: build/app/outputs/flutter-apk/app-x86_64-release.apk
 
   # ==========================================
-  # WINDOWS BUILD (İKON ADIMI YOK)
+  # WINDOWS BUILD
   # ==========================================
   build-windows:
     name: Build Windows EXE
@@ -104,7 +104,7 @@ jobs:
           path: gettic-windows.zip
 
   # ==========================================
-  # MACOS BUILD (İKON ADIMI YOK)
+  # MACOS BUILD
   # ==========================================
   build-macos:
     name: Build macOS
@@ -121,6 +121,7 @@ jobs:
           flutter config --enable-macos-desktop
           flutter create . --project-name gettic --org com.gettic --platforms=macos
           rm -f test/widget_test.dart
+          
           find macos -name "*.pbxproj" -exec sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = [0-9.]*;/MACOSX_DEPLOYMENT_TARGET = 10.15;/g' {} \;
           if [ -f "macos/Podfile" ]; then
             sed -i '' "s/platform :osx, .*/platform :osx, '10.15'/" macos/Podfile
@@ -136,7 +137,7 @@ jobs:
           path: build/macos/Build/Products/Release/gettic-macos.zip
 
   # ==========================================
-  # LINUX BUILD (ÇALIŞAN VERSİYON)
+  # LINUX BUILD
   # ==========================================
   build-linux:
     name: Build Linux
@@ -251,8 +252,7 @@ jobs:
             sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
           fi
       
-      # ✅ Linux'ta da ikon üret (senin çalışan versiyonunda vardı)
-      - run: dart run flutter_launcher_icons
+      # ✅ SADECE SPLASH (flutter_launcher_icons yok)
       - run: dart run flutter_native_splash:create
       
       - name: Build Linux
