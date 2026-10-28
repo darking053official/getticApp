@@ -554,7 +554,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     MaterialPageRoute(builder: (_) => const ProfilePage())).then((_) => _load())),
           ]),
 
-          _section('GIZLILIK'),
+          _section('GİZLİLİK'),
           _card([
             _switch(Icons.visibility_outlined, 'Çevrimiçi durumu göster',
                 subtitle: 'Kapalıyken çevrimiçi görünmezsin',
@@ -583,7 +583,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: _blockUnknownMessages, onChanged: (v) => setState(() => _blockUnknownMessages = v)),
           ]),
 
-          _section('BILDIRIMLER'),
+          _section('BİLDİRİMLER'),
           _card([
             _switch(Icons.notifications_active_outlined, 'Bildirim Sesi',
                 value: _notifSound, onChanged: (v) => setState(() => _notifSound = v)),
@@ -608,7 +608,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: _notifGroupSummary, onChanged: (v) => setState(() => _notifGroupSummary = v)),
           ]),
 
-          _section('GORUNUM'),
+          _section('GÖRÜNÜM'),
           _card([
             _switch(Icons.brightness_auto, 'Sistem Temasını Kullan',
                 value: _useSystemTheme, onChanged: (v) => setState(() => _useSystemTheme = v)),
@@ -632,7 +632,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: _highContrast, onChanged: (v) => setState(() => _highContrast = v)),
           ]),
 
-          _section('VERI VE DEPOLAMA'),
+          _section('VERİ VE DEPOLAMA'),
           _card([
             _switch(Icons.wifi, 'Wi-Fi ile Otomatik İndir',
                 value: _autoDownloadWifi, onChanged: (v) => setState(() => _autoDownloadWifi = v)),
@@ -662,13 +662,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 subtitle: 'Profil + e-posta JSON', onTap: _downloadMyData),
           ]),
 
-          _section('CIHAZLARIM'),
+          _section('CİHAZLARIM'),
           _card([
             _tile(Icons.phone_android, 'Aktif Oturumlar',
                 subtitle: 'Tüm cihazlardan çıkış', onTap: _showActiveSessions),
           ]),
 
-          _section('DIL'),
+          _section('DİL'),
           _card([
             _tile(Icons.language, 'Uygulama Dili', subtitle: _language,
                 onTap: () => _showSelection(title: 'Dil',
@@ -677,7 +677,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     onSelect: (v) => setState(() => _language = v))),
           ]),
 
-          _section('GELISMIS'),
+          _section('GELİŞMİŞ'),
           _card([
             _switch(Icons.science_outlined, 'Deneysel Özellikler',
                 value: _experimentalFeatures,
@@ -716,7 +716,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => _snack('Teşekkürler')),
           ]),
 
-          _section('TEHLIKELI BOLGE', color: Colors.redAccent),
+          _section('TEHLİKELİ BÖLGE', color: Colors.redAccent),
           _card([
             _tile(Icons.logout, 'Çıkış Yap', onTap: _signOut),
             _divider(),
@@ -817,7 +817,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 8),
-          const Text('Turkiye\'de sevgiyle yapildi',
+          const Text('Türkiye\'de sevgiyle yapıldı',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
         ],
       ),
