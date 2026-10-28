@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'core/app_state.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
 import 'pages/auth_page.dart';
@@ -44,14 +45,31 @@ void main() async {
   // OneSignal başlat
   OneSignal.initialize(oneSignalAppId);
   
-  // Bildirim izni iste (Android 13+ ve iOS için)
+  // Bildirim izni iste
   OneSignal.Notifications.requestPermission(true);
 
   // Kullanıcı oturum açtıysa OneSignal'a tanıt
   final currentUser = Supabase.instance.client.auth.currentUser;
   if (currentUser != null) {
     OneSignal.login(currentUser.id);
+    AppState().setCurrentUserId(currentUser.id);
   }
+
+  // Uygulama hayat döngüsünü dinle
+  WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
+
+  // OneSignal ön plan bildirim dinleyicisi
+  // Eğer kullanıcı zaten o sohbetteyse bildirimi gösterme
+  OneSignal.Notifications.addForegroundWillDisplayListener((event) {
+    final additionalData = event.notification.additionalData;
+    final conversationId = additionalData?['conversation_id'] as String?;
+    
+    if (conversationId != null && !AppState().shouldShowNotification(conversationId)) {
+      // Kullanıcı zaten bu sohbette → bildirimi gösterme
+      event.preventDefault();
+      debugPrint('Bildirim engellendi (aktif sohbet): $conversationId');
+    }
+  });
 
   runApp(const ProviderScope(child: GetticApp()));
 }
@@ -70,6 +88,27 @@ class GetticApp extends StatelessWidget {
   }
 }
 
+// ==========================================
+// UYGULAMA HAYAT DÖNGÜSÜ
+// ==========================================
+class _AppLifecycleObserver extends WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    if (state == AppLifecycleState.resumed) {
+      AppState().setAppInForeground(true);
+      debugPrint('AppState: Uygulama ön planda');
+    } else if (state == AppLifecycleState.paused) {
+      AppState().setAppInForeground(false);
+      debugPrint('AppState: Uygulama arka planda');
+    }
+  }
+}
+
+// ==========================================
+// AUTH WRAPPER
+// ==========================================
 class AuthWrapper extends ConsumerStatefulWidget {
   const AuthWrapper({super.key});
 
@@ -79,6 +118,7 @@ class AuthWrapper extends ConsumerStatefulWidget {
 
 class _AuthWrapperState extends ConsumerState<AuthWrapper> {
   bool _showSplash = true;
+  StreamSubscription<AuthState>? _authSubscription;
 
   @override
   void initState() {
@@ -89,18 +129,27 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
       if (mounted) setState(() => _showSplash = false);
     });
 
-    // Auth state değiştiğinde OneSignal'ı güncelle
-    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+    // Auth state değiştiğinde OneSignal ve AppState'i güncelle
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       final event = data.event;
-      if (event == AuthChangeEvent.signedIn) {
-        final userId = data.session?.user.id;
-        if (userId != null) {
-          OneSignal.login(userId);
-        }
+      final userId = data.session?.user.id;
+      
+      if (event == AuthChangeEvent.signedIn && userId != null) {
+        OneSignal.login(userId);
+        AppState().setCurrentUserId(userId);
+        debugPrint('OneSignal login: $userId');
       } else if (event == AuthChangeEvent.signedOut) {
         OneSignal.logout();
+        AppState().reset();
+        debugPrint('OneSignal logout');
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -134,6 +183,9 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
   }
 }
 
+// ==========================================
+// SPLASH SCREEN
+// ==========================================
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
 
