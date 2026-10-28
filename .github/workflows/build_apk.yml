@@ -320,7 +320,7 @@ jobs:
           Section: net
           Priority: optional
           Architecture: amd64
-          Maintainer: darking053 <support@gettic.app>
+          Maintainer: darking053 <writetome@gettic.dpdns.org>
           Description: Gettic - Gizlilik odaklı mesajlaşma uygulaması
           Depends: libgtk-3-0, libblkid1, liblzma5, libsecret-1-0
           EOF
