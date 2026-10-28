@@ -218,7 +218,6 @@ class SupabaseService {
   }) async {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
 
-    // 1. Grup sohbetini oluştur
     final conv = await _client
         .from(AppConstants.tableConversations)
         .insert({
@@ -231,7 +230,6 @@ class SupabaseService {
 
     final convId = conv['id'];
 
-    // 2. Üyeleri ekle (kendisi + seçilenler)
     final List<Map<String, dynamic>> inserts = [
       {'conversation_id': convId, 'user_id': currentUser!.id},
       ...memberIds.map((uid) => {'conversation_id': convId, 'user_id': uid}),
@@ -326,6 +324,7 @@ class SupabaseService {
         .map((data) => data.map((json) => Message.fromJson(json)).toList());
   }
 
+  /// Metin mesajı gönderir
   Future<void> sendMessage(String conversationId, String content, {String? replyToId}) async {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
     if (content.trim().isEmpty) throw Exception('Boş mesaj gönderilemez');
@@ -335,6 +334,34 @@ class SupabaseService {
       'sender_id': currentUser!.id,
       'content': content.trim(),
       'type': 'text',
+      if (replyToId != null) 'reply_to': replyToId,
+    });
+
+    try {
+      await _client.from(AppConstants.tableConversations).update({
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', conversationId);
+    } catch (e) {
+      print('Sohbet güncelleme hatası: $e');
+    }
+  }
+
+  /// Medya mesajı gönderir (fotoğraf, video, ses, dosya)
+  Future<void> sendMediaMessage({
+    required String conversationId,
+    required String type,
+    required String mediaPath,
+    String? content,
+    String? replyToId,
+  }) async {
+    if (currentUser == null) throw Exception('Giriş yapmalısınız');
+
+    await _client.from(AppConstants.tableMessages).insert({
+      'conversation_id': conversationId,
+      'sender_id': currentUser!.id,
+      'content': content?.trim() ?? '',
+      'type': type,
+      'media_url': mediaPath,
       if (replyToId != null) 'reply_to': replyToId,
     });
 
