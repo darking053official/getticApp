@@ -109,7 +109,6 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // ✅ GERÇEK: Şifre sıfırlama e-postası
   Future<void> _sendPasswordResetEmail() async {
     final email = _service.currentUser?.email;
     if (email == null || email.isEmpty) {
@@ -127,13 +126,12 @@ class _SettingsPageState extends State<SettingsPage> {
         email,
         redirectTo: 'gettic://reset-password',
       );
-      _snack('Sıfırlama e-postası gönderildi ✓');
+      _snack('Sıfırlama e-postası gönderildi');
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
   }
 
-  // ✅ GERÇEK: E-posta değiştir (doğrulama e-postası gider)
   Future<void> _changeEmail() async {
     final controller = TextEditingController(text: _service.currentUser?.email ?? '');
     final result = await showDialog<String>(
@@ -156,13 +154,12 @@ class _SettingsPageState extends State<SettingsPage> {
     if (result == null || result.isEmpty || !result.contains('@')) return;
     try {
       await Supabase.instance.client.auth.updateUser(UserAttributes(email: result));
-      _snack('Doğrulama e-postası gönderildi ✓');
+      _snack('Doğrulama e-postası gönderildi');
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
   }
 
-  // ✅ GERÇEK: Çıkış yap
   Future<void> _signOut() async {
     final c = await _confirm(
       title: 'Çıkış Yap',
@@ -172,7 +169,6 @@ class _SettingsPageState extends State<SettingsPage> {
     if (c == true) await _service.signOut();
   }
 
-  // ✅ GERÇEK: Hesabı sil
   Future<void> _deleteAccount() async {
     final c = await _confirm(
       title: 'Hesabı Sil',
@@ -195,7 +191,6 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // ✅ GERÇEK: Önbellek temizle
   Future<void> _clearCache() async {
     final c = await _confirm(
       title: 'Önbelleği Temizle',
@@ -207,21 +202,19 @@ class _SettingsPageState extends State<SettingsPage> {
       PaintingBinding.instance.imageCache.clear();
       PaintingBinding.instance.imageCache.clearLiveImages();
       await _calculateCache();
-      _snack('Önbellek temizlendi ✓');
+      _snack('Önbellek temizlendi');
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
   }
 
-  // ✅ GERÇEK: Uygulamayı paylaş
   Future<void> _shareApp() async {
     await Clipboard.setData(const ClipboardData(
       text: 'Gettic - Gizlilik odaklı mesajlaşma. İndir: https://gettic.dpdns.org',
     ));
-    _snack('Davet linki kopyalandı ✓');
+    _snack('Davet linki kopyalandı');
   }
 
-  // ✅ GERÇEK: QR kod assets/qr.png
   Future<void> _showQrCode() async {
     showDialog(
       context: context,
@@ -260,30 +253,26 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ✅ GERÇEK: Destek e-postası kopyala
   Future<void> _contactSupport() async {
-    await Clipboard.setData(const ClipboardData(text: 'support@gettic.app'));
-    _snack('support@gettic.app kopyalandı ✓');
+    await Clipboard.setData(const ClipboardData(text: 'writetome@gettic.dpdns.org'));
+    _snack('writetome@gettic.dpdns.org kopyalandı');
   }
 
-  // ✅ GERÇEK: Hata raporu şablonu
   Future<void> _reportBug() async {
     final body = 'Uygulama: Gettic v${AppConstants.appVersion}\n'
         'Cihaz: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}\n'
         'Kullanıcı: ${_profile?.username}\n\nHata Açıklaması:\n';
-    await Clipboard.setData(ClipboardData(text: body));
-    _snack('Hata şablonu kopyalandı ✓');
+    await Clipboard.setData(ClipboardData(text: 'Konu: Hata Bildirimi\n\n$body'));
+    _snack('Hata şablonu kopyalandı. writetome@gettic.dpdns.org adresine gönder');
   }
 
-  // ✅ GERÇEK: Özellik isteği şablonu
   Future<void> _requestFeature() async {
     await Clipboard.setData(const ClipboardData(
       text: 'Konu: Özellik İsteği\n\nİstediğim özellik: ',
     ));
-    _snack('Şablon kopyalandı ✓');
+    _snack('Şablon kopyalandı. writetome@gettic.dpdns.org adresine gönder');
   }
 
-  // ✅ GERÇEK: Açık kaynak lisansları
   Future<void> _showLicenses() async {
     showLicensePage(
       context: context,
@@ -293,7 +282,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ✅ GERÇEK: Hakkında
   Future<void> _showAbout() async {
     showDialog(
       context: context,
@@ -339,7 +327,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ✅ GERÇEK: Tüm oturumları kapat
   Future<void> _showActiveSessions() async {
     showDialog(
       context: context,
@@ -361,7 +348,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: AppTheme.online.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text('AKTİF',
+                child: const Text('AKTIF',
                     style: TextStyle(color: AppTheme.online, fontSize: 10, fontWeight: FontWeight.bold)),
               ),
             ),
@@ -377,7 +364,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Navigator.pop(ctx);
                 try {
                   await Supabase.instance.client.auth.signOut(scope: SignOutScope.global);
-                  _snack('Tüm oturumlar kapatıldı ✓');
+                  _snack('Tüm oturumlar kapatıldı');
                 } catch (e) {
                   _snack('Hata: $e', isError: true);
                 }
@@ -390,7 +377,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ✅ GERÇEK: Sohbetleri JSON olarak kopyala
   Future<void> _backupChats() async {
     final c = await _confirm(
       title: 'Sohbetleri Yedekle',
@@ -428,13 +414,12 @@ class _SettingsPageState extends State<SettingsPage> {
       };
 
       await Clipboard.setData(ClipboardData(text: jsonEncode(backup)));
-      _snack('${allMessages.length} mesaj kopyalandı ✓');
+      _snack('${allMessages.length} mesaj kopyalandı');
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
   }
 
-  // ✅ GERÇEK: Verilerimi indir
   Future<void> _downloadMyData() async {
     final c = await _confirm(
       title: 'Verilerimi İndir',
@@ -460,7 +445,7 @@ class _SettingsPageState extends State<SettingsPage> {
       };
 
       await Clipboard.setData(ClipboardData(text: jsonEncode(data)));
-      _snack('Verilerin kopyalandı ✓');
+      _snack('Verilerin kopyalandı');
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
@@ -499,7 +484,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // Seçim dialogu
   void _showSelection({
     required String title,
     required List<String> options,
@@ -570,7 +554,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     MaterialPageRoute(builder: (_) => const ProfilePage())).then((_) => _load())),
           ]),
 
-          _section('GİZLİLİK'),
+          _section('GIZLILIK'),
           _card([
             _switch(Icons.visibility_outlined, 'Çevrimiçi durumu göster',
                 subtitle: 'Kapalıyken çevrimiçi görünmezsin',
@@ -599,7 +583,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: _blockUnknownMessages, onChanged: (v) => setState(() => _blockUnknownMessages = v)),
           ]),
 
-          _section('BİLDİRİMLER'),
+          _section('BILDIRIMLER'),
           _card([
             _switch(Icons.notifications_active_outlined, 'Bildirim Sesi',
                 value: _notifSound, onChanged: (v) => setState(() => _notifSound = v)),
@@ -624,7 +608,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: _notifGroupSummary, onChanged: (v) => setState(() => _notifGroupSummary = v)),
           ]),
 
-          _section('GÖRÜNÜM'),
+          _section('GORUNUM'),
           _card([
             _switch(Icons.brightness_auto, 'Sistem Temasını Kullan',
                 value: _useSystemTheme, onChanged: (v) => setState(() => _useSystemTheme = v)),
@@ -648,7 +632,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: _highContrast, onChanged: (v) => setState(() => _highContrast = v)),
           ]),
 
-          _section('VERİ VE DEPOLAMA'),
+          _section('VERI VE DEPOLAMA'),
           _card([
             _switch(Icons.wifi, 'Wi-Fi ile Otomatik İndir',
                 value: _autoDownloadWifi, onChanged: (v) => setState(() => _autoDownloadWifi = v)),
@@ -678,13 +662,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 subtitle: 'Profil + e-posta JSON', onTap: _downloadMyData),
           ]),
 
-          _section('CİHAZLARIM'),
+          _section('CIHAZLARIM'),
           _card([
             _tile(Icons.phone_android, 'Aktif Oturumlar',
                 subtitle: 'Tüm cihazlardan çıkış', onTap: _showActiveSessions),
           ]),
 
-          _section('DİL'),
+          _section('DIL'),
           _card([
             _tile(Icons.language, 'Uygulama Dili', subtitle: _language,
                 onTap: () => _showSelection(title: 'Dil',
@@ -693,7 +677,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     onSelect: (v) => setState(() => _language = v))),
           ]),
 
-          _section('GELİŞMİŞ'),
+          _section('GELISMIS'),
           _card([
             _switch(Icons.science_outlined, 'Deneysel Özellikler',
                 value: _experimentalFeatures,
@@ -713,7 +697,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
           _section('YARDIM VE DESTEK'),
           _card([
-            _tile(Icons.email_outlined, 'Bize Ulaşın', subtitle: 'support@gettic.app',
+            _tile(Icons.email_outlined, 'Bize Ulaşın', subtitle: 'writetome@gettic.dpdns.org',
                 onTap: _contactSupport),
             _divider(),
             _tile(Icons.bug_report_outlined, 'Hata Bildir', onTap: _reportBug),
@@ -729,10 +713,10 @@ class _SettingsPageState extends State<SettingsPage> {
             _tile(Icons.article_outlined, 'Açık Kaynak Lisansları', onTap: _showLicenses),
             _divider(),
             _tile(Icons.star_outline, 'Uygulamayı Puanla',
-                onTap: () => _snack('Teşekkürler! 💜')),
+                onTap: () => _snack('Teşekkürler')),
           ]),
 
-          _section('TEHLİKELİ BÖLGE', color: Colors.redAccent),
+          _section('TEHLIKELI BOLGE', color: Colors.redAccent),
           _card([
             _tile(Icons.logout, 'Çıkış Yap', onTap: _signOut),
             _divider(),
@@ -749,8 +733,6 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
-
-  // ============ YARDIMCI WIDGET'LAR ============
 
   Widget _profileCard() {
     return Padding(
@@ -835,7 +817,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 8),
-          const Text('Made with 💜 in Türkiye',
+          const Text('Turkiye\'de sevgiyle yapildi',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
         ],
       ),
