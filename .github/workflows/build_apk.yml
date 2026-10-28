@@ -26,21 +26,33 @@ jobs:
       - name: Setup Android
         run: |
           flutter create . --project-name gettic --org com.gettic --platforms=android
+          
+          # Paket adını garanti et
+          sed -i 's/applicationId ".*"/applicationId "gettic.by.darking053"/' android/app/build.gradle || true
+          
+          # minSdkVersion ve Kotlin
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
           sed -i 's/minSdkVersion [0-9]*/minSdkVersion 23/' android/app/build.gradle || true
-          sed -i 's/applicationId ".*"/applicationId "gettic.by.darking053"/' android/app/build.gradle || true
           sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.23"/' android/settings.gradle || true
+          
+          # İzinler
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           for perm in INTERNET CAMERA RECORD_AUDIO READ_EXTERNAL_STORAGE READ_MEDIA_IMAGES; do
             if ! grep -q "android.permission.$perm" "$MANIFEST"; then
               sed -i "/<manifest /a \    <uses-permission android:name=\"android.permission.$perm\" />" "$MANIFEST"
             fi
           done
+          
+          # Uygulama adı
           sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
+          
+          # Test dosyasını sil
           rm -f test/widget_test.dart
+          
+          echo "✅ Paket adı:"
+          grep "applicationId" android/app/build.gradle
       - run: flutter pub get
-      # ✅ İKON VE SPLASH OLUŞTUR
-      - run: dart run flutter_launcher_icons
+      - run: dart run flutter_launcher_icons --platforms android
       - run: dart run flutter_native_splash:create
       - run: flutter build apk --release --split-per-abi
       - uses: actions/upload-artifact@v4
@@ -74,6 +86,8 @@ jobs:
           flutter config --enable-windows-desktop
           flutter create . --project-name gettic --org com.gettic --platforms=windows
           Remove-Item -Path test/widget_test.dart -ErrorAction SilentlyContinue
+          
+          # VS2022 yaması
           $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
           $files = @("packages\flutter_tools\lib\src\windows\build_windows.dart", "packages\flutter_tools\lib\src\windows\visual_studio.dart")
           foreach ($f in $files) {
@@ -93,8 +107,7 @@ jobs:
             Set-Content pubspec.yaml -Value $content -NoNewline
           }
           flutter pub get
-      # ✅ İKON OLUŞTUR (Windows)
-      - run: dart run flutter_launcher_icons
+      - run: dart run flutter_launcher_icons --platforms windows
       - run: flutter build windows --release
       - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath gettic-windows.zip
       - uses: actions/upload-artifact@v4
@@ -120,13 +133,14 @@ jobs:
           flutter config --enable-macos-desktop
           flutter create . --project-name gettic --org com.gettic --platforms=macos
           rm -f test/widget_test.dart
+          
+          # Deployment target 10.15
           find macos -name "*.pbxproj" -exec sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = [0-9.]*;/MACOSX_DEPLOYMENT_TARGET = 10.15;/g' {} \;
           if [ -f "macos/Podfile" ]; then
             sed -i '' "s/platform :osx, .*/platform :osx, '10.15'/" macos/Podfile
           fi
       - run: flutter pub get
-      # ✅ İKON OLUŞTUR (macOS)
-      - run: dart run flutter_launcher_icons
+      - run: dart run flutter_launcher_icons --platforms macos
       - run: flutter build macos --release
       - run: |
           cd build/macos/Build/Products/Release/
@@ -250,11 +264,8 @@ jobs:
           CMAKE_FILE="linux/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
             sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
-            echo "✅ -Werror devre dışı bırakıldı"
           fi
       
-      # ✅ İKON VE SPLASH OLUŞTUR (Linux)
-      - run: dart run flutter_launcher_icons
       - run: dart run flutter_native_splash:create
       
       - name: Build Linux
@@ -320,7 +331,7 @@ jobs:
           Section: net
           Priority: optional
           Architecture: amd64
-          Maintainer: darking053 <writetome@gettic.dpdns.org>
+          Maintainer: darking053 <support@gettic.app>
           Description: Gettic - Gizlilik odaklı mesajlaşma uygulaması
           Depends: libgtk-3-0, libblkid1, liblzma5, libsecret-1-0
           EOF
