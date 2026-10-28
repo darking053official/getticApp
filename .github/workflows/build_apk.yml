@@ -52,7 +52,7 @@ jobs:
           echo "✅ Paket adı:"
           grep "applicationId" android/app/build.gradle
       - run: flutter pub get
-      - run: dart run flutter_launcher_icons --platforms android
+      - run: dart run flutter_launcher_icons
       - run: dart run flutter_native_splash:create
       - run: flutter build apk --release --split-per-abi
       - uses: actions/upload-artifact@v4
@@ -107,7 +107,7 @@ jobs:
             Set-Content pubspec.yaml -Value $content -NoNewline
           }
           flutter pub get
-      - run: dart run flutter_launcher_icons --platforms windows
+      - run: dart run flutter_launcher_icons
       - run: flutter build windows --release
       - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath gettic-windows.zip
       - uses: actions/upload-artifact@v4
@@ -140,7 +140,7 @@ jobs:
             sed -i '' "s/platform :osx, .*/platform :osx, '10.15'/" macos/Podfile
           fi
       - run: flutter pub get
-      - run: dart run flutter_launcher_icons --platforms macos
+      - run: dart run flutter_launcher_icons
       - run: flutter build macos --release
       - run: |
           cd build/macos/Build/Products/Release/
