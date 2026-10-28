@@ -282,14 +282,14 @@ class _ChatListPageState extends State<ChatListPage>
     );
   }
 
-  // ============ HEADER (Küçültüldü) ============
+  // ============ HEADER ============
   Widget _buildHeader() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 4), // Padding azaltıldı
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
       child: Row(
         children: [
           Container(
-            width: 32, // 38'den 32'ye düşürüldü
+            width: 32,
             height: 32,
             decoration: BoxDecoration(
               color: Colors.white,
@@ -297,7 +297,7 @@ class _ChatListPageState extends State<ChatListPage>
               boxShadow: [
                 BoxShadow(
                   color: AppTheme.primary.withOpacity(0.4),
-                  blurRadius: 8, // Gölge azaltıldı
+                  blurRadius: 8,
                   spreadRadius: 1,
                 ),
               ],
@@ -316,7 +316,7 @@ class _ChatListPageState extends State<ChatListPage>
             'Gettic',
             style: TextStyle(
               color: AppTheme.textPrimary,
-              fontSize: 22, // 26'dan 22'ye düşürüldü
+              fontSize: 22,
               fontWeight: FontWeight.bold,
               letterSpacing: -0.5,
             ),
@@ -329,7 +329,7 @@ class _ChatListPageState extends State<ChatListPage>
               Future.delayed(const Duration(milliseconds: 100),
                   () => _searchFocus.requestFocus());
             },
-            constraints: const BoxConstraints(), // Buton padding'i sıfırlandı
+            constraints: const BoxConstraints(),
             padding: EdgeInsets.zero,
           ),
           const SizedBox(width: 12),
@@ -345,12 +345,12 @@ class _ChatListPageState extends State<ChatListPage>
     );
   }
 
-  // ============ SEARCH BAR (Küçültüldü) ============
+  // ============ SEARCH BAR ============
   Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Container(
-        height: 42, // Yükseklik sabitlendi
+        height: 42,
         decoration: BoxDecoration(
           color: AppTheme.surface,
           borderRadius: BorderRadius.circular(20),
@@ -395,12 +395,12 @@ class _ChatListPageState extends State<ChatListPage>
     );
   }
 
-  // ============ TABS (Küçültüldü) ============
+  // ============ TABS ============
   Widget _buildTabs() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Container(
-        height: 36, // Yükseklik sabitlendi
+        height: 36,
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           color: AppTheme.surface,
@@ -477,14 +477,14 @@ class _ChatListPageState extends State<ChatListPage>
             onLongPress: () => _showConversationMenu(item),
             borderRadius: BorderRadius.circular(12),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), // Padding azaltıldı
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
                 children: [
                   Stack(
                     clipBehavior: Clip.none,
                     children: [
                       Container(
-                        width: 48, // 54'ten 48'e düşürüldü
+                        width: 48,
                         height: 48,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
@@ -504,7 +504,7 @@ class _ChatListPageState extends State<ChatListPage>
                                       : '?',
                                   style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 20, // 22'den 20'ye düşürüldü
+                                    fontSize: 20,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -516,7 +516,7 @@ class _ChatListPageState extends State<ChatListPage>
                           right: 0,
                           bottom: 0,
                           child: Container(
-                            width: 12, // 14'ten 12'ye düşürüldü
+                            width: 12,
                             height: 12,
                             decoration: BoxDecoration(
                               color: AppTheme.online,
@@ -555,7 +555,7 @@ class _ChatListPageState extends State<ChatListPage>
                           style: const TextStyle(
                             color: AppTheme.textPrimary,
                             fontWeight: FontWeight.w600,
-                            fontSize: 15, // 16'dan 15'e düşürüldü
+                            fontSize: 15,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -624,7 +624,7 @@ class _ChatListPageState extends State<ChatListPage>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(20), // 24'ten 20'ye düşürüldü
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: AppTheme.surface,
                 shape: BoxShape.circle,
@@ -636,7 +636,7 @@ class _ChatListPageState extends State<ChatListPage>
                     : isGroups
                         ? Icons.groups_outlined
                         : Icons.chat_bubble_outline_rounded,
-                size: 48, // 56'dan 48'e düşürüldü
+                size: 48,
                 color: AppTheme.primary,
               ),
             ),
@@ -649,7 +649,7 @@ class _ChatListPageState extends State<ChatListPage>
                       : 'Henüz sohbetiniz yok',
               style: const TextStyle(
                 color: AppTheme.textPrimary,
-                fontSize: 16, // 18'den 16'ya düşürüldü
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -676,7 +676,7 @@ class _ChatListPageState extends State<ChatListPage>
                   backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  minimumSize: const Size(0, 44), // Buton boyutu küçültüldü
+                  minimumSize: const Size(0, 44),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -689,7 +689,7 @@ class _ChatListPageState extends State<ChatListPage>
     );
   }
 
-  // ============ BOTTOM NAV (Küçültüldü) ============
+  // ============ BOTTOM NAV ============
   Widget _buildBottomNav() {
     return Container(
       decoration: const BoxDecoration(
@@ -702,9 +702,9 @@ class _ChatListPageState extends State<ChatListPage>
         unselectedItemColor: AppTheme.textSecondary,
         type: BottomNavigationBarType.fixed,
         currentIndex: _currentIndex,
-        selectedFontSize: 11, // Yazı boyutu küçültüldü
+        selectedFontSize: 11,
         unselectedFontSize: 11,
-        iconSize: 22, // İkon boyutu küçültüldü
+        iconSize: 22,
         onTap: (index) {
           setState(() => _currentIndex = index);
           if (index == 0) _load();
@@ -733,12 +733,12 @@ class _ChatListPageState extends State<ChatListPage>
   Widget _navIcon(IconData icon, int index) {
     final active = _currentIndex == index;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), // Padding küçültüldü
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
         color: active ? AppTheme.primary.withOpacity(0.15) : Colors.transparent,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Icon(icon, size: 22), // İkon boyutu sabitlendi
+      child: Icon(icon, size: 22),
     );
   }
 }
@@ -752,7 +752,7 @@ class _UnreadBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      constraints: const BoxConstraints(minWidth: 20), // Min genişlik küçültüldü
+      constraints: const BoxConstraints(minWidth: 20),
       decoration: BoxDecoration(
         color: AppTheme.primary,
         borderRadius: BorderRadius.circular(10),
@@ -770,7 +770,7 @@ class _UnreadBadge extends StatelessWidget {
   }
 }
 
-// ============ USER SEARCH SHEET (Küçültüldü) ============
+// ============ USER SEARCH SHEET ============
 class UserSearchSheet extends StatefulWidget {
   const UserSearchSheet({super.key});
   @override
@@ -798,7 +798,7 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.only(
-        top: 12, // Padding küçültüldü
+        top: 12,
         left: 16,
         right: 16,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
@@ -806,7 +806,7 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
       child: Column(
         children: [
           Container(
-            width: 36, // Çubuk küçültüldü
+            width: 36,
             height: 4,
             decoration: BoxDecoration(
               color: AppTheme.inputBorder,
@@ -817,7 +817,7 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
           const Text(
             'Yeni Sohbet',
             style: TextStyle(
-              fontSize: 18, // 20'den 18'e düşürüldü
+              fontSize: 18,
               fontWeight: FontWeight.bold,
               color: AppTheme.textPrimary,
             ),
@@ -865,7 +865,7 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
                             leading: CircleAvatar(
-                              radius: 20, // 24'ten 20'ye düşürüldü
+                              radius: 20,
                               backgroundColor: AppTheme.primary,
                               backgroundImage: user.avatarUrl != null
                                   ? CachedNetworkImageProvider(
@@ -884,7 +884,7 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
                               style: const TextStyle(
                                 color: AppTheme.textPrimary,
                                 fontWeight: FontWeight.w500,
-                                fontSize: 15, // Yazı boyutu eklendi
+                                fontSize: 15,
                               ),
                             ),
                             onTap: () => Navigator.pop(context, user),
