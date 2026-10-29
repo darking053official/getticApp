@@ -38,7 +38,7 @@ dependencies:
   video_player: ^2.8.6
   chewie: ^1.8.0
   open_filex: ^4.3.4
-  emoji_mart_flutter: ^0.1.6
+  awesome_emoji_picker: ^1.0.4 
 
 dev_dependencies:
   flutter_test:
