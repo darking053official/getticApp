@@ -14,6 +14,8 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPLv3-green"></a>
 </p>
 
+[![Architecture diagram](https://gitdiagram.com/diagram-badge.svg)](https://gitdiagram.com/darking053official/getticapp?utm_source=readme&utm_medium=badge)
+
 <p align="center">
   Gizlilik odaklı, modern ve hızlı mesajlaşma uygulaması.<br/>
   <b>Flutter</b> ile geliştirilmiş, <b>Supabase</b> altyapısı üzerinde çalışır.
