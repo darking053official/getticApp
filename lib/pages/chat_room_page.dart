@@ -11,7 +11,7 @@ import 'package:record/record.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
-import 'package:emoji_mart_flutter/emoji_mart_flutter.dart';
+import 'package:emoji_text_field/emoji_text_field.dart';
 import '../core/app_state.dart';
 import '../core/theme.dart';
 import '../models/message.dart';
@@ -51,7 +51,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   bool _isOtherTyping = false;
   bool _isSending = false;
   bool _showScrollToBottom = false;
-  bool _showEmoji = false;
   bool _isLoading = true;
   bool _isUploading = false;
   bool _isRecording = false;
@@ -151,7 +150,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     setState(() {
       _isSending = true;
       _replyTo = null;
-      _showEmoji = false;
     });
 
     try {
@@ -166,9 +164,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     }
   }
 
-  // ==========================================
-  // PROFİL ÖNİZLEMEYE GİT
-  // ==========================================
   void _openProfilePreview() {
     Navigator.push(
       context,
@@ -213,6 +208,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   _attachOption(Icons.image, 'Fotoğraf', Colors.purple, () { Navigator.pop(ctx); _pickImage(); }),
                   _attachOption(Icons.videocam, 'Video', Colors.blue, () { Navigator.pop(ctx); _pickVideo(); }),
                   _attachOption(Icons.insert_drive_file, 'Dosya', Colors.orange, () { Navigator.pop(ctx); _pickFile(); }),
+                  _attachOption(Icons.audiotrack, 'Ses', Colors.green, () { Navigator.pop(ctx); _pickAudioFile(); }), 
                 ],
               ),
               const SizedBox(height: 16),
@@ -259,6 +255,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     final result = await FilePicker.platform.pickFiles();
     if (result == null || result.files.single.path == null) return;
     await _uploadMedia(File(result.files.single.path!), 'file');
+  }
+
+  Future<void> _pickAudioFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.audio, 
+    );
+    if (result == null || result.files.single.path == null) return;
+    await _uploadMedia(File(result.files.single.path!), 'audio');
   }
 
   Future<void> _uploadMedia(File file, String type) async {
@@ -507,35 +511,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           if (_replyTo != null) _buildReplyPreview(),
           
           _isRecording ? _buildRecordingBar() : _buildInputBar(),
-          
-          if (_showEmoji)
-            SizedBox(
-              height: 280,
-              child: Theme(
-                data: Theme.of(context).copyWith(
-                  extensions: [
-                    const EmojiPickerTheme(
-                      backgroundColor: AppTheme.background,
-                      searchFieldColor: AppTheme.surface,
-                      selectedTabColor: AppTheme.primary,
-                      unselectedTabColor: AppTheme.textSecondary,
-                    ),
-                  ],
-                ),
-                child: EmojiPicker(
-                  set: EmojiPreset.apple.preset,
-                  onEmojiSelected: (Emoji emoji) {
-                    _controller.text += emoji.char;
-                    _controller.selection = TextSelection.fromPosition(
-                      TextPosition(offset: _controller.text.length),
-                    );
-                    setState(() {});
-                  },
-                  size: 24,
-                  columns: 8,
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -895,19 +870,49 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   Widget _buildRecordingBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(color: AppTheme.surface, border: Border(top: BorderSide(color: AppTheme.inputBorder))),
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(top: BorderSide(color: AppTheme.inputBorder)),
+      ),
       child: Row(
         children: [
-          const Icon(Icons.mic, color: Colors.redAccent, size: 24),
-          const SizedBox(width: 12),
-          const Text('Kayıt yapılıyor...', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14)),
-          const Spacer(),
-          Text('${_recordSeconds}s', style: const TextStyle(color: AppTheme.primary, fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(width: 16),
-          IconButton(icon: const Icon(Icons.close, color: Colors.redAccent, size: 24), onPressed: () => _stopRecording(send: false)),
           Container(
-            decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
-            child: IconButton(icon: const Icon(Icons.send, color: Colors.white, size: 22), onPressed: () => _stopRecording(send: true)),
+            width: 12,
+            height: 12,
+            decoration: const BoxDecoration(
+              color: Colors.redAccent,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Text(
+            'Kayıt yapılıyor...',
+            style: TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w500),
+          ),
+          const Spacer(),
+          Text(
+            '${_recordSeconds}s',
+            style: const TextStyle(color: AppTheme.primary, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(width: 16),
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.redAccent, size: 26),
+            onPressed: () => _stopRecording(send: false),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            decoration: const BoxDecoration(
+              color: AppTheme.primary,
+              shape: BoxShape.circle,
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.send, color: Colors.white, size: 22),
+              onPressed: () => _stopRecording(send: true),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
           ),
         ],
       ),
@@ -943,13 +948,20 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           Expanded(
             child: Container(
               margin: const EdgeInsets.only(bottom: 4),
-              decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(24), border: Border.all(color: AppTheme.inputBorder)),
-              child: TextField(
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppTheme.inputBorder),
+              ),
+              child: EmojiTextField(
                 controller: _controller,
-                textCapitalization: TextCapitalization.sentences,
+                hintText: 'Mesaj yaz...',
                 maxLines: 5,
-                minLines: 1,
-                style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
+                onChanged: (v) {
+                  _onTyping(v);
+                  setState(() {});
+                },
+                onSubmitted: (_) => _send(),
                 decoration: const InputDecoration(
                   hintText: 'Mesaj yaz...',
                   hintStyle: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
@@ -959,11 +971,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   isDense: true,
                 ),
-                onChanged: (v) {
-                  _onTyping(v);
-                  setState(() {});
-                },
-                onSubmitted: (_) => _send(),
               ),
             ),
           ),
@@ -1086,7 +1093,7 @@ class _VideoViewerState extends State<_VideoViewer> {
 }
 
 // ==========================================
-// SES OYNATICI
+// SES OYNATICI (Geliştirilmiş Sürüm)
 // ==========================================
 class _AudioPlayerWidget extends StatefulWidget {
   final String path;
@@ -1102,12 +1109,18 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
   final _player = AudioPlayer();
   bool _isPlaying = false;
   bool _isLoading = true;
+  bool _hasError = false;
   String? _signedUrl;
+  Duration _position = Duration.zero;
+  Duration _duration = const Duration(seconds: 1);
+  StreamSubscription<Duration>? _positionSubscription;
+  StreamSubscription<Duration?>? _durationSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadAudio();
+
     _player.playerStateStream.listen((state) {
       if (mounted) {
         setState(() {
@@ -1119,23 +1132,48 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
         });
       }
     });
+
+    _positionSubscription = _player.positionStream.listen((pos) {
+      if (mounted) setState(() => _position = pos);
+    });
+
+    _durationSubscription = _player.durationStream.listen((dur) {
+      if (mounted && dur != null) setState(() => _duration = dur);
+    });
   }
 
   Future<void> _loadAudio() async {
-    final url = await widget.storage.getSignedUrl(widget.path);
-    if (mounted) {
-      setState(() {
-        _signedUrl = url;
-        _isLoading = false;
-      });
+    try {
+      final url = await widget.storage.getSignedUrl(widget.path);
+      if (mounted) {
+        setState(() {
+          _signedUrl = url;
+          _isLoading = false;
+          _hasError = url == null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+        });
+      }
     }
   }
 
   Future<void> _togglePlay() async {
-    if (_signedUrl == null) return;
+    if (_signedUrl == null || _hasError) return;
+    
     if (_player.audioSource == null) {
-      await _player.setUrl(_signedUrl!);
+      try {
+        await _player.setUrl(_signedUrl!);
+      } catch (e) {
+        if (mounted) setState(() => _hasError = true);
+        return;
+      }
     }
+    
     if (_isPlaying) {
       await _player.pause();
     } else {
@@ -1145,59 +1183,106 @@ class _AudioPlayerWidgetState extends State<_AudioPlayerWidget> {
 
   @override
   void dispose() {
+    _positionSubscription?.cancel();
+    _durationSubscription?.cancel();
     _player.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        constraints: const BoxConstraints(minWidth: 180, maxWidth: 240),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+            SizedBox(width: 8),
+            Text('Yükleniyor...', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    if (_hasError) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        constraints: const BoxConstraints(minWidth: 180, maxWidth: 240),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, color: Colors.redAccent, size: 20),
+            SizedBox(width: 8),
+            Text('Ses yüklenemedi', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    final progress = _duration.inMilliseconds > 0 
+        ? _position.inMilliseconds / _duration.inMilliseconds 
+        : 0.0;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      constraints: const BoxConstraints(minWidth: 180, maxWidth: 240),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      constraints: const BoxConstraints(minWidth: 200, maxWidth: 260),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (_isLoading)
-            const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-          else
-            IconButton(
-              icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 28),
-              onPressed: _togglePlay,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
+          GestureDetector(
+            onTap: _togglePlay,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                color: Colors.white,
+                size: 28,
+              ),
             ),
+          ),
           const SizedBox(width: 8),
           Expanded(
-            child: StreamBuilder<Duration>(
-              stream: _player.positionStream,
-              builder: (context, snapshot) {
-                final position = snapshot.data ?? Duration.zero;
-                final total = _player.duration ?? const Duration(seconds: 1);
-                final progress = total.inMilliseconds > 0 ? position.inMilliseconds / total.inMilliseconds : 0.0;
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: progress,
-                        minHeight: 4,
-                        backgroundColor: Colors.white24,
-                        valueColor: const AlwaysStoppedAnimation(Colors.white),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: List.generate(20, (index) {
+                    final heights = [6.0, 12.0, 20.0, 16.0, 8.0, 14.0, 22.0, 18.0, 10.0, 6.0, 12.0, 20.0, 16.0, 8.0, 14.0, 22.0, 18.0, 10.0, 6.0, 12.0];
+                    final isActive = (index / 20) <= progress;
+                    return Container(
+                      width: 3,
+                      height: heights[index % heights.length],
+                      margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                      decoration: BoxDecoration(
+                        color: isActive ? Colors.white : Colors.white38,
+                        borderRadius: BorderRadius.circular(2),
                       ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _formatDuration(_isPlaying || _position > Duration.zero ? _position : _duration),
+                      style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w500),
                     ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(_formatDuration(position), style: const TextStyle(color: Colors.white70, fontSize: 10)),
-                        Text(_formatDuration(total), style: const TextStyle(color: Colors.white70, fontSize: 10)),
-                      ],
+                    const Text(
+                      'Sesli Mesaj',
+                      style: TextStyle(color: Colors.white54, fontSize: 10, fontStyle: FontStyle.italic),
                     ),
                   ],
-                );
-              },
+                ),
+              ],
             ),
           ),
         ],
