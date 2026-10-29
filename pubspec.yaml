@@ -1,7 +1,7 @@
 name: gettic
 description: Gettic - Gizlilik odaklı mesajlaşma uygulaması
 publish_to: 'none'
-version: 1.0.1+2
+version: 1.0.3+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -19,7 +19,6 @@ dependencies:
   intl: ^0.19.0
   cached_network_image: ^3.3.1
   image_picker: ^1.1.2
-  emoji_picker_flutter: ^2.1.1
   
   # --- State Management ---
   flutter_riverpod: ^2.5.1
