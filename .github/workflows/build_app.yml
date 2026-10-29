@@ -5,6 +5,14 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Aynı branch'e art arda push gelirse eski derlemeyi iptal et
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ==========================================
   # ANDROID BUILD
@@ -59,6 +67,66 @@ jobs:
           
           sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
           rm -f test/widget_test.dart
+
+      # Opsiyonel: GitHub Secrets tanımlıysa APK sabit anahtarla imzalanır.
+      # Tanımlı değilse eskisi gibi debug anahtarıyla imzalanır.
+      # Neden önemli: debug anahtarı her CI çalışmasında yeniden üretilir,
+      # bu yüzden her derleme farklı imzalı olur ve telefondaki uygulamanın
+      # üzerine "güncelleme" olarak kurulamaz.
+      # Gerekli secret'lar: KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+      - name: Configure release signing (optional)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::KEYSTORE_BASE64 secret tanımlı değil. APK debug anahtarıyla imzalanacak (güncelleme olarak kurulamaz)."
+            exit 0
+          fi
+
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          cat > android/key.properties << EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+
+          python3 - << 'PY'
+          import re
+          p = 'android/app/build.gradle'
+          s = open(p, encoding='utf-8').read()
+
+          if 'keystoreProperties' not in s:
+              props = (
+                  "def keystoreProperties = new Properties()\n"
+                  "def keystorePropertiesFile = rootProject.file('key.properties')\n"
+                  "if (keystorePropertiesFile.exists()) {\n"
+                  "    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n"
+                  "}\n\n"
+              )
+              s, n1 = re.subn(r'^android \{', lambda m: props + m.group(0), s, count=1, flags=re.M)
+
+              signing = (
+                  "    signingConfigs {\n"
+                  "        release {\n"
+                  "            keyAlias keystoreProperties['keyAlias']\n"
+                  "            keyPassword keystoreProperties['keyPassword']\n"
+                  "            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null\n"
+                  "            storePassword keystoreProperties['storePassword']\n"
+                  "        }\n"
+                  "    }\n\n"
+              )
+              s, n2 = re.subn(r'^    buildTypes \{', lambda m: signing + m.group(0), s, count=1, flags=re.M)
+
+              assert n1 == 1 and n2 == 1, 'build.gradle şablonu beklenenden farklı, imzalama eklenemedi'
+              assert 'signingConfig signingConfigs.debug' in s, 'release signingConfig satırı bulunamadı'
+              s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
+              open(p, 'w', encoding='utf-8').write(s)
+              print('Release imzalama yapılandırıldı.')
+          PY
           
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
@@ -151,6 +219,18 @@ jobs:
           if [ -f "macos/Podfile" ]; then
             sed -i '' "s/platform :osx, .*/platform :osx, '10.15'/" macos/Podfile
           fi
+
+      # macOS uygulamaları sandbox içinde çalışır. Varsayılan Release
+      # entitlements dosyasında ağ izni YOKTUR; eklenmezse release sürümde
+      # Supabase'e bağlanılamaz. Dosya seçici ve mikrofon için de izin eklenir.
+      - name: Configure macOS entitlements
+        run: |
+          for f in macos/Runner/Release.entitlements macos/Runner/DebugProfile.entitlements; do
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.network.client bool true" "$f" || true
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.files.user-selected.read-write bool true" "$f" || true
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.device.audio-input bool true" "$f" || true
+          done
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string \"Sesli mesaj gondermek icin mikrofon gerekli\"" macos/Runner/Info.plist || true
           
       - run: flutter pub get
       - run: flutter build macos --release
@@ -315,11 +395,15 @@ jobs:
           exec "${HERE}/usr/bin/gettic" "$@"
           EOF
           chmod +x $APPDIR/AppRun
-          ARCH=x86_64 ./appimagetool $APPDIR gettic-linux-x86_64.AppImage
+          # FUSE gerektirmeden çalışsın (CI ortamında daha güvenilir)
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool $APPDIR gettic-linux-x86_64.AppImage
           
       - name: Create DEB Package
         run: |
           set -e
+          # Sürümü pubspec.yaml'dan al (1.0.2+3 -> 1.0.2)
+          VERSION=$(grep '^version:' pubspec.yaml | head -1 | sed 's/version:[[:space:]]*//; s/+.*//')
+          echo "DEB sürümü: $VERSION"
           DEB_DIR=gettic-deb
           mkdir -p $DEB_DIR/DEBIAN $DEB_DIR/usr/bin $DEB_DIR/usr/lib/gettic $DEB_DIR/usr/share/applications $DEB_DIR/usr/share/icons/hicolor/256x256/apps
           cp -r build/linux/x64/release/bundle/* $DEB_DIR/usr/lib/gettic/
@@ -339,9 +423,9 @@ jobs:
           if [ -f "assets/logo.png" ]; then
             cp assets/logo.png $DEB_DIR/usr/share/icons/hicolor/256x256/apps/gettic.png
           fi
-          cat > $DEB_DIR/DEBIAN/control << 'EOF'
+          cat > $DEB_DIR/DEBIAN/control << EOF
           Package: gettic
-          Version: 1.0.2
+          Version: $VERSION
           Section: net
           Priority: optional
           Architecture: amd64
