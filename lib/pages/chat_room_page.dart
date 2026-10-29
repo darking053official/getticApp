@@ -18,6 +18,7 @@ import '../models/message.dart';
 import '../models/profile.dart';
 import '../services/supabase_service.dart';
 import '../services/storage_service.dart';
+import 'profile_preview.dart';
 
 class ChatRoomPage extends StatefulWidget {
   final String conversationId;
@@ -163,6 +164,29 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
+  }
+
+  // ==========================================
+  // PROFİL ÖNİZLEMEYE GİT
+  // ==========================================
+  void _openProfilePreview() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProfilePreviewPage(
+          profile: widget.otherUser,
+          onMessageTap: () => Navigator.pop(context),
+          onBlockTap: () async {
+            Navigator.pop(context);
+            _showSnack('${widget.otherUser.username} engellendi');
+          },
+          onReportTap: () async {
+            Navigator.pop(context);
+            _showSnack('${widget.otherUser.username} bildirildi');
+          },
+        ),
+      ),
+    );
   }
 
   // ==========================================
@@ -525,7 +549,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       title: Row(
         children: [
           GestureDetector(
-            onTap: () => _showSnack('Profil görüntüleme yakında'),
+            onTap: _openProfilePreview,
             child: CircleAvatar(
               backgroundColor: AppTheme.primary,
               radius: 20,
