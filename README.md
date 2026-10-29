@@ -78,10 +78,9 @@ Veri akışı tek yönlüdür: sayfalar (`pages`) yalnızca servis katmanı ve R
 - [x] Sesli mesaj desteği — v1.1
 - [x] Grup sohbetleri — v1.1
 - [x] Anlık bildirim entegrasyonu — v1.1
-- [x] iOS desteği — v1.1
-- [ ] Grup yönetimi: üye davet/çıkarma, grup fotoğrafı — v1.2
-- [ ] Uçtan uca şifreli fotoğraf mesajları — v1.2 (video: sonraki sürüm)
-- [ ] FCM ile arka plan push bildirimleri
+- [x] Grup yönetimi: üye davet/çıkarma, grup fotoğrafı — v1.2
+- [x] Uçtan uca şifreli fotoğraf mesajları — v1.2 (video: sonraki sürüm)
+- [x] FCM ile arka plan push bildirimleri
 
 ## Geliştiriciler
 
