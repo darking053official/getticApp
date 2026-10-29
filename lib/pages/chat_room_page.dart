@@ -208,7 +208,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   _attachOption(Icons.image, 'Fotoğraf', Colors.purple, () { Navigator.pop(ctx); _pickImage(); }),
                   _attachOption(Icons.videocam, 'Video', Colors.blue, () { Navigator.pop(ctx); _pickVideo(); }),
                   _attachOption(Icons.insert_drive_file, 'Dosya', Colors.orange, () { Navigator.pop(ctx); _pickFile(); }),
-                  _attachOption(Icons.audiotrack, 'Ses', Colors.green, () { Navigator.pop(ctx); _pickAudioFile(); }), 
+                  _attachOption(Icons.audiotrack, 'Ses', Colors.green, () { Navigator.pop(ctx); _pickAudioFile(); }),
+                  _attachOption(Icons.gif_box, 'GIF', Colors.pink, () { Navigator.pop(ctx); _showGifSearch(); }), 
                 ],
               ),
               const SizedBox(height: 16),
@@ -290,6 +291,26 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       _showSnack('Hata: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
+  // ==========================================
+  // GIF ARAMA (Supabase Edge Function)
+  // ==========================================
+  Future<void> _showGifSearch() async {
+    final selectedGifUrl = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => const _GifSearchSheet(),
+    );
+
+    if (selectedGifUrl != null) {
+      await _service.sendMediaMessage(
+        conversationId: widget.conversationId,
+        type: 'gif',
+        mediaPath: selectedGifUrl,
+      );
     }
   }
 
@@ -648,6 +669,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       contentWidget = const Text('Bu mesaj silindi', style: TextStyle(color: AppTheme.textSecondary, fontStyle: FontStyle.italic));
     } else if (m.type == 'image' && m.mediaUrl != null) {
       contentWidget = _buildImageBubble(m.mediaUrl!);
+    } else if (m.type == 'gif' && m.mediaUrl != null) {
+      contentWidget = _buildGifBubble(m.mediaUrl!);
     } else if (m.type == 'video' && m.mediaUrl != null) {
       contentWidget = _buildVideoBubble(m.mediaUrl!);
     } else if (m.type == 'audio' && m.mediaUrl != null) {
@@ -740,6 +763,20 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  // Klipy'den gelen URL doğrudan ağ üzerinden geldiği için Signed URL'ye gerek yok
+  Widget _buildGifBubble(String url) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: CachedNetworkImage(
+        imageUrl: url,
+        width: 200,
+        fit: BoxFit.cover,
+        placeholder: (_, __) => Container(width: 200, height: 150, color: AppTheme.bgTertiary, child: const Center(child: CircularProgressIndicator(color: AppTheme.primary))),
+        errorWidget: (_, __, ___) => Container(width: 200, height: 150, color: AppTheme.bgTertiary, child: const Icon(Icons.broken_image, color: AppTheme.textSecondary)),
       ),
     );
   }
@@ -1005,6 +1042,159 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 }
 
 // ==========================================
+// GIF ARAMA SHEET (Klipy Supabase Edge Function üzerinden)
+// ==========================================
+class _GifSearchSheet extends StatefulWidget {
+  const _GifSearchSheet();
+
+  @override
+  State<_GifSearchSheet> createState() => _GifSearchSheetState();
+}
+
+class _GifSearchSheetState extends State<_GifSearchSheet> {
+  final _searchController = TextEditingController();
+  List<Map<String, dynamic>> _results = [];
+  bool _isSearching = false;
+  bool _hasSearched = false;
+
+  Future<void> _search(String query) async {
+    if (query.trim().isEmpty) return;
+
+    setState(() {
+      _isSearching = true;
+      _hasSearched = true;
+    });
+
+    try {
+      // Supabase Edge Function'ı çağır
+      final response = await Supabase.instance.client.functions.invoke(
+        'search-gifs',
+        body: {'query': query.trim()},
+      );
+
+      if (response.status != 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('GIF araması başarısız oldu')),
+          );
+        }
+        return;
+      }
+
+      final data = response.data;
+      final gifs = data['results'] as List? ?? [];
+
+      if (mounted) {
+        setState(() {
+          _results = List<Map<String, dynamic>>.from(gifs);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Hata: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSearching = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.8,
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(
+        top: 16, left: 16, right: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 40, height: 4,
+            decoration: BoxDecoration(
+              color: AppTheme.inputBorder,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'GIF Ara',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _searchController,
+            autofocus: true,
+            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
+            decoration: const InputDecoration(
+              hintText: 'Örn: komik, aşk, merhaba...',
+              prefixIcon: Icon(Icons.search, color: AppTheme.textSecondary),
+            ),
+            textInputAction: TextInputAction.search,
+            onSubmitted: _search,
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: _isSearching
+                ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
+                : _hasSearched && _results.isEmpty
+                    ? const Center(child: Text('Sonuç bulunamadı.', style: TextStyle(color: AppTheme.textSecondary)))
+                    : !_hasSearched
+                        ? const Center(child: Text('Aramak için yazın.', style: TextStyle(color: AppTheme.textSecondary)))
+                        : GridView.builder(
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              crossAxisSpacing: 8,
+                              mainAxisSpacing: 8,
+                              childAspectRatio: 1.2,
+                            ),
+                            itemCount: _results.length,
+                            itemBuilder: (context, i) {
+                              final gif = _results[i];
+                              final url = gif['url'] as String?;
+                              final preview = (gif['preview'] as String?) ?? url;
+
+                              if (url == null) return const SizedBox.shrink();
+
+                              return GestureDetector(
+                                onTap: () => Navigator.pop(context, url),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: CachedNetworkImage(
+                                    imageUrl: preview!,
+                                    fit: BoxFit.cover,
+                                    placeholder: (_, __) => Container(
+                                      color: AppTheme.bgTertiary,
+                                      child: const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary)),
+                                    ),
+                                    errorWidget: (_, __, ___) => Container(
+                                      color: AppTheme.bgTertiary,
+                                      child: const Icon(Icons.broken_image, color: AppTheme.textSecondary),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
 // TAM EKRAN FOTOĞRAF GÖRÜNTÜLEYİCİ
 // ==========================================
 class _FullImageViewer extends StatelessWidget {
@@ -1093,7 +1283,7 @@ class _VideoViewerState extends State<_VideoViewer> {
 }
 
 // ==========================================
-// SES OYNATICI (Geliştirilmiş Sürüm)
+// SES OYNATICI
 // ==========================================
 class _AudioPlayerWidget extends StatefulWidget {
   final String path;
