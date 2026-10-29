@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
@@ -12,7 +11,7 @@ import 'package:record/record.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
-import 'package:open_filex/open_filex.dart';
+import 'package:emoji_mart_flutter/emoji_mart_flutter.dart';
 import '../core/app_state.dart';
 import '../core/theme.dart';
 import '../models/message.dart';
@@ -38,28 +37,24 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   final _storage = StorageService();
   final _controller = TextEditingController();
   final _scroll = ScrollController();
+  final AudioRecorder _audioRecorder = AudioRecorder();
 
   List<Message> _messages = [];
-  late Stream<List<Message>> _messagesStream;
   StreamSubscription<List<Message>>? _messagesSubscription;
   RealtimeChannel? _typingChannel;
 
   Timer? _typingTimer;
   Timer? _typingDebounce;
+  Timer? _recordTimer;
 
   bool _isOtherTyping = false;
   bool _isSending = false;
   bool _showScrollToBottom = false;
   bool _showEmoji = false;
   bool _isLoading = true;
-  
-  // Medya için
   bool _isUploading = false;
   bool _isRecording = false;
   int _recordSeconds = 0;
-  Timer? _recordTimer;
-  final AudioRecorder _audioRecorder = AudioRecorder();
-  String? _currentRecordingPath;
 
   Message? _replyTo;
 
@@ -67,14 +62,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   void initState() {
     super.initState();
     AppState().setActiveConversation(widget.conversationId);
-    _messagesStream = _service.streamMessages(widget.conversationId);
     _subscribeToMessages();
     _subscribeToTyping();
     _setupScrollListener();
   }
 
   void _subscribeToMessages() {
-    _messagesSubscription = _messagesStream.listen(
+    final stream = _service.streamMessages(widget.conversationId);
+    _messagesSubscription = stream.listen(
       (msgs) {
         if (mounted) {
           setState(() {
@@ -115,8 +110,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   void _setupScrollListener() {
     _scroll.addListener(() {
-      final atBottom = _scroll.position.pixels >=
-          _scroll.position.maxScrollExtent - 100;
+      final atBottom = _scroll.position.pixels >= _scroll.position.maxScrollExtent - 100;
       if (_showScrollToBottom == atBottom) {
         setState(() => _showScrollToBottom = !atBottom);
       }
@@ -147,12 +141,12 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   Future<void> _send() async {
-    final t = _controller.text.trim();
-    if (t.isEmpty || _isSending) return;
+    final text = _controller.text.trim();
+    if (text.isEmpty || _isSending) return;
 
     final replyId = _replyTo?.id;
-
     _controller.clear();
+    
     setState(() {
       _isSending = true;
       _replyTo = null;
@@ -160,14 +154,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     });
 
     try {
-      await _service.sendMessage(
-        widget.conversationId,
-        t,
-        replyToId: replyId,
-      );
+      await _service.sendMessage(widget.conversationId, text, replyToId: replyId);
     } catch (e) {
       if (mounted) {
-        _controller.text = t;
+        _controller.text = text;
         _showSnack('Mesaj gönderilemedi: $e', isError: true);
       }
     } finally {
@@ -176,7 +166,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   // ==========================================
-  // MEDYA SEÇİM VE YÜKLEME
+  // MEDYA İŞLEMLERİ
   // ==========================================
   void _showAttachmentMenu() {
     showModalBottomSheet(
@@ -288,12 +278,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       setState(() {
         _isRecording = true;
         _recordSeconds = 0;
-        _currentRecordingPath = path;
       });
 
       _recordTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) setState(() => _recordSeconds++);
-        if (_recordSeconds >= 120) _stopRecording(); // Maks 2 dakika
+        if (_recordSeconds >= 120) _stopRecording();
       });
     } else {
       _showSnack('Mikrofon izni gerekli', isError: true);
@@ -314,9 +303,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     }
   }
 
-  // ==========================================
-  // UI
-  // ==========================================
   void _showSnack(String msg, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -331,13 +317,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   void _showMessageOptions(Message msg, bool isMine) {
     if (msg.isDeleted) return;
-
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -499,24 +482,33 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
           if (_replyTo != null) _buildReplyPreview(),
           
-          // Kayıt durumu veya input
           _isRecording ? _buildRecordingBar() : _buildInputBar(),
           
           if (_showEmoji)
             SizedBox(
               height: 280,
-              child: EmojiPicker(
-                onEmojiSelected: (cat, emoji) {
-                  _controller.text += emoji.emoji;
-                  _controller.selection = TextSelection.fromPosition(TextPosition(offset: _controller.text.length));
-                },
-                config: Config(
-                  height: 256,
-                  checkPlatformCompatibility: true,
-                  emojiViewConfig: EmojiViewConfig(backgroundColor: AppTheme.background, columns: 8, emojiSizeMax: 28),
-                  categoryViewConfig: const CategoryViewConfig(backgroundColor: AppTheme.background, iconColor: AppTheme.textSecondary, iconColorSelected: AppTheme.primary),
-                  bottomActionBarConfig: const BottomActionBarConfig(backgroundColor: AppTheme.surface),
-                  searchViewConfig: const SearchViewConfig(backgroundColor: AppTheme.surface),
+              child: Theme(
+                data: Theme.of(context).copyWith(
+                  extensions: [
+                    const EmojiPickerTheme(
+                      backgroundColor: AppTheme.background,
+                      searchFieldColor: AppTheme.surface,
+                      selectedTabColor: AppTheme.primary,
+                      unselectedTabColor: AppTheme.textSecondary,
+                    ),
+                  ],
+                ),
+                child: EmojiPicker(
+                  set: EmojiPreset.apple.preset,
+                  onEmojiSelected: (Emoji emoji) {
+                    _controller.text += emoji.char;
+                    _controller.selection = TextSelection.fromPosition(
+                      TextPosition(offset: _controller.text.length),
+                    );
+                    setState(() {});
+                  },
+                  size: 24,
+                  columns: 8,
                 ),
               ),
             ),
@@ -651,7 +643,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   Widget _buildBubble(Message m, bool mine, DateFormat timeFormat) {
-    // Medya türüne göre içerik
     Widget contentWidget;
     
     if (m.isDeleted) {
@@ -661,7 +652,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     } else if (m.type == 'video' && m.mediaUrl != null) {
       contentWidget = _buildVideoBubble(m.mediaUrl!);
     } else if (m.type == 'audio' && m.mediaUrl != null) {
-      contentWidget = _buildAudioBubble(m.mediaUrl!);
+      contentWidget = _AudioPlayerWidget(path: m.mediaUrl!, storage: _storage);
     } else if (m.type == 'file' && m.mediaUrl != null) {
       contentWidget = _buildFileBubble(m.mediaUrl!, m.content ?? 'Dosya');
     } else {
@@ -673,9 +664,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
-      padding: m.type == 'text' || m.isDeleted
-          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
-          : const EdgeInsets.all(4),
+      padding: m.type == 'text' || m.isDeleted ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10) : const EdgeInsets.all(4),
       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
       decoration: BoxDecoration(
         color: mine ? AppTheme.primary : AppTheme.surface,
@@ -741,11 +730,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           future: _storage.getSignedUrl(path),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
-              return Container(
-                width: 200, height: 200,
-                color: AppTheme.bgTertiary,
-                child: const Center(child: CircularProgressIndicator(color: AppTheme.primary)),
-              );
+              return Container(width: 200, height: 200, color: AppTheme.bgTertiary, child: const Center(child: CircularProgressIndicator(color: AppTheme.primary)));
             }
             return CachedNetworkImage(
               imageUrl: snapshot.data!,
@@ -780,19 +765,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     );
   }
 
-  Widget _buildAudioBubble(String path) {
-    return _AudioPlayerWidget(
-      path: path,
-      storage: _storage,
-    );
-  }
-
   Widget _buildFileBubble(String path, String fileName) {
     return InkWell(
       onTap: () async {
         final url = await _storage.getSignedUrl(path);
         if (url != null) {
-          // Dosyayı indirip aç (basit yol)
           _showSnack('Dosya indirme: $fileName');
         }
       },
@@ -843,28 +820,54 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     return fmt.format(date);
   }
 
+  // ==========================================
+  // YANIT ÖNİZLEME
+  // ==========================================
   Widget _buildReplyPreview() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: const BoxDecoration(color: AppTheme.surface, border: Border(top: BorderSide(color: AppTheme.inputBorder))),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(top: BorderSide(color: AppTheme.inputBorder, width: 1)),
+      ),
       child: Row(
         children: [
-          Container(width: 3, height: 36, color: AppTheme.primary, margin: const EdgeInsets.only(right: 8)),
+          Container(
+            width: 4, height: 40,
+            decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(2)),
+            margin: const EdgeInsets.only(right: 12),
+          ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Yanıtlanıyor', style: TextStyle(color: AppTheme.primary, fontSize: 11, fontWeight: FontWeight.bold)),
-                Text(_replyTo?.content ?? '[Medya]', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                Text(
+                  _replyTo!.senderId == _service.currentUser?.id
+                      ? 'Kendine Yanıt Veriyorsun'
+                      : '${widget.otherUser.username} kişisine yanıt veriyorsun',
+                  style: const TextStyle(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _replyTo!.content ?? '[Medya]',
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                ),
               ],
             ),
           ),
-          IconButton(icon: const Icon(Icons.close, color: AppTheme.textSecondary, size: 20), onPressed: () => setState(() => _replyTo = null)),
+          IconButton(
+            icon: const Icon(Icons.close, color: AppTheme.textSecondary, size: 20),
+            onPressed: () => setState(() => _replyTo = null),
+          ),
         ],
       ),
     );
   }
 
+  // ==========================================
+  // SES KAYIT ÇUBUĞU
+  // ==========================================
   Widget _buildRecordingBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -879,7 +882,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           const SizedBox(width: 16),
           IconButton(icon: const Icon(Icons.close, color: Colors.redAccent, size: 24), onPressed: () => _stopRecording(send: false)),
           Container(
-            decoration: BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
+            decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
             child: IconButton(icon: const Icon(Icons.send, color: Colors.white, size: 22), onPressed: () => _stopRecording(send: true)),
           ),
         ],
@@ -887,23 +890,35 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     );
   }
 
+  // ==========================================
+  // YAZMA ALANI
+  // ==========================================
   Widget _buildInputBar() {
     return Container(
       padding: EdgeInsets.only(
-        left: 8, right: 8, top: 8,
-        bottom: MediaQuery.of(context).viewInsets.bottom > 0 ? 8 : MediaQuery.of(context).padding.bottom + 8,
+        left: 12, right: 12, top: 12,
+        bottom: MediaQuery.of(context).viewInsets.bottom > 0 ? 12 : MediaQuery.of(context).padding.bottom + 12,
       ),
-      decoration: const BoxDecoration(color: AppTheme.background, border: Border(top: BorderSide(color: AppTheme.inputBorder))),
+      decoration: const BoxDecoration(
+        color: AppTheme.background,
+        border: Border(top: BorderSide(color: AppTheme.inputBorder, width: 1)),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline, color: AppTheme.textSecondary, size: 24),
-            onPressed: _showAttachmentMenu,
+          Container(
+            margin: const EdgeInsets.only(bottom: 4),
+            decoration: BoxDecoration(color: AppTheme.surface, shape: BoxShape.circle, border: Border.all(color: AppTheme.inputBorder)),
+            child: IconButton(
+              icon: const Icon(Icons.add, color: AppTheme.primary, size: 24),
+              onPressed: _showAttachmentMenu,
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+            ),
           ),
+          const SizedBox(width: 8),
           Expanded(
             child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 4),
+              margin: const EdgeInsets.only(bottom: 4),
               decoration: BoxDecoration(color: AppTheme.surface, borderRadius: BorderRadius.circular(24), border: Border.all(color: AppTheme.inputBorder)),
               child: TextField(
                 controller: _controller,
@@ -914,42 +929,44 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 decoration: const InputDecoration(
                   hintText: 'Mesaj yaz...',
                   hintStyle: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-                  border: InputBorder.none, enabledBorder: InputBorder.none, focusedBorder: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12), isDense: true,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  isDense: true,
                 ),
-                onChanged: _onTyping,
+                onChanged: (v) {
+                  _onTyping(v);
+                  setState(() {});
+                },
                 onSubmitted: (_) => _send(),
               ),
             ),
           ),
-          const SizedBox(width: 6),
-          if (_controller.text.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: GestureDetector(
-                onTapDown: (_) => _startRecording(),
-                onTapUp: (_) => _stopRecording(send: true),
-                onTapCancel: () => _stopRecording(send: false),
-                child: Container(
-                  width: 48, height: 48,
-                  decoration: BoxDecoration(color: AppTheme.surface, shape: BoxShape.circle, border: Border.all(color: AppTheme.inputBorder)),
-                  child: const Icon(Icons.mic, color: AppTheme.textSecondary, size: 24),
-                ),
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Container(
-                decoration: BoxDecoration(color: _isSending ? AppTheme.primary.withOpacity(0.5) : AppTheme.primary, borderRadius: BorderRadius.circular(50)),
-                child: IconButton(
-                  icon: _isSending
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Icon(Icons.send_rounded, color: Colors.white, size: 22),
-                  onPressed: _isSending ? null : _send,
-                ),
-              ),
-            ),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: _controller.text.trim().isEmpty
+                ? GestureDetector(
+                    onLongPress: _startRecording,
+                    onLongPressUp: () => _stopRecording(send: true),
+                    child: Container(
+                      width: 48, height: 48,
+                      decoration: BoxDecoration(color: AppTheme.surface, shape: BoxShape.circle, border: Border.all(color: AppTheme.inputBorder)),
+                      child: const Icon(Icons.mic, color: AppTheme.textSecondary, size: 24),
+                    ),
+                  )
+                : GestureDetector(
+                    onTap: _send,
+                    child: Container(
+                      width: 48, height: 48,
+                      decoration: BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle, boxShadow: [BoxShadow(color: AppTheme.primary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 2))]),
+                      child: _isSending
+                          ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
+                          : const Icon(Icons.send_rounded, color: Colors.white, size: 22),
+                    ),
+                  ),
+          ),
         ],
       ),
     );
