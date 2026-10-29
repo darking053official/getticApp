@@ -23,6 +23,7 @@ jobs:
           flutter-version: '3.19.2'
           channel: 'stable'
           cache: true
+      
       - name: Setup Android
         run: |
           flutter create . --project-name gettic --org com.gettic --platforms=android
@@ -34,13 +35,12 @@ jobs:
           
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           
-          # İzin listesi (Yeni izinler dahil)
+          # Temel izinleri ekle
           for perm in \
             "android.permission.INTERNET" \
             "android.permission.CAMERA" \
             "android.permission.RECORD_AUDIO" \
             "android.permission.READ_EXTERNAL_STORAGE" \
-            "android.permission.WRITE_EXTERNAL_STORAGE" \
             "android.permission.READ_MEDIA_IMAGES" \
             "android.permission.READ_MEDIA_VIDEO" \
             "android.permission.READ_MEDIA_AUDIO" \
@@ -52,16 +52,13 @@ jobs:
             fi
           done
           
-          # Android 13+ için özel WRITE_EXTERNAL_STORAGE kısıtlaması
-          if ! grep -q 'android:maxSdkVersion="28"' "$MANIFEST"; then
+          # Android 13+ için özel WRITE_EXTERNAL_STORAGE
+          if ! grep -q "android.permission.WRITE_EXTERNAL_STORAGE" "$MANIFEST"; then
             sed -i '/<manifest /a \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />' "$MANIFEST"
           fi
           
           sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
           rm -f test/widget_test.dart
-          
-          echo "✅ AndroidManifest izinleri eklendi."
-          head -25 "$MANIFEST"
           
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
@@ -94,6 +91,7 @@ jobs:
           flutter-version: '3.19.2'
           channel: 'stable'
           cache: true
+      
       - name: Setup Windows
         run: |
           flutter config --enable-windows-desktop
@@ -111,6 +109,7 @@ jobs:
           $cacheDir = Join-Path $flutterRoot "bin\cache"
           Remove-Item -Path "$cacheDir\flutter_tools.stamp" -ErrorAction SilentlyContinue
           Remove-Item -Path "$cacheDir\flutter_tools.snapshot" -ErrorAction SilentlyContinue
+          
       - name: Disable flutter_secure_storage for Windows
         run: |
           if (Test-Path "pubspec.yaml") {
@@ -119,8 +118,10 @@ jobs:
             Set-Content pubspec.yaml -Value $content -NoNewline
           }
           flutter pub get
+          
       - run: flutter build windows --release
       - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath gettic-windows.zip
+      
       - uses: actions/upload-artifact@v4
         with:
           name: gettic-windows
@@ -139,6 +140,7 @@ jobs:
           flutter-version: '3.19.2'
           channel: 'stable'
           cache: true
+      
       - name: Setup macOS
         run: |
           flutter config --enable-macos-desktop
@@ -149,11 +151,13 @@ jobs:
           if [ -f "macos/Podfile" ]; then
             sed -i '' "s/platform :osx, .*/platform :osx, '10.15'/" macos/Podfile
           fi
+          
       - run: flutter pub get
       - run: flutter build macos --release
       - run: |
           cd build/macos/Build/Products/Release/
           zip -r gettic-macos.zip gettic.app
+          
       - uses: actions/upload-artifact@v4
         with:
           name: gettic-macos
@@ -167,6 +171,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Install Linux Deps
         run: |
           sudo apt-get update
@@ -238,7 +243,7 @@ jobs:
             }
           }
           EOF
-      
+          
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.2'
@@ -250,7 +255,7 @@ jobs:
           flutter config --enable-linux-desktop
           flutter create . --project-name gettic --org com.gettic --platforms=linux
           rm -f test/widget_test.dart
-      
+          
       - name: Add dependency overrides
         run: |
           if ! grep -q "url_launcher_linux:" pubspec.yaml; then
@@ -264,7 +269,7 @@ jobs:
               echo "    path: ./fake_file_selector_linux" >> pubspec.yaml
             fi
           fi
-      
+          
       - name: Get Dependencies
         run: flutter pub get
       
@@ -274,7 +279,7 @@ jobs:
           if [ -f "$CMAKE_FILE" ]; then
             sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
           fi
-      
+          
       - run: dart run flutter_native_splash:create
       
       - name: Build Linux
@@ -282,7 +287,7 @@ jobs:
           flutter clean
           flutter pub get
           flutter build linux --release
-      
+          
       - name: Create AppImage
         run: |
           set -e
@@ -311,7 +316,7 @@ jobs:
           EOF
           chmod +x $APPDIR/AppRun
           ARCH=x86_64 ./appimagetool $APPDIR gettic-linux-x86_64.AppImage
-      
+          
       - name: Create DEB Package
         run: |
           set -e
@@ -347,12 +352,11 @@ jobs:
           chmod 755 $DEB_DIR/DEBIAN
           chmod 644 $DEB_DIR/DEBIAN/control
           dpkg-deb --build $DEB_DIR gettic-linux-amd64.deb
-      
+          
       - uses: actions/upload-artifact@v4
         with:
           name: gettic-linux-appimage
           path: gettic-linux-x86_64.AppImage
-      
       - uses: actions/upload-artifact@v4
         with:
           name: gettic-linux-deb
