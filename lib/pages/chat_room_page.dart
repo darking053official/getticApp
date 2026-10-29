@@ -14,7 +14,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:emoji_text_field/emoji_text_field.dart';
 import 'package:open_filex/open_filex.dart';
-import 'package:chewie/chewie.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_state.dart';
 import '../core/theme.dart';
@@ -2142,9 +2141,13 @@ class _VideoPlayerPage extends StatefulWidget {
 }
 
 class _VideoPlayerPageState extends State<_VideoPlayerPage> {
+  static const List<double> _speeds = [1.0, 1.5, 2.0];
+
   VideoPlayerController? _vc;
-  ChewieController? _chewie;
+  Timer? _hideTimer;
   bool _error = false;
+  bool _controlsVisible = true;
+  int _speedIndex = 0;
 
   @override
   void initState() {
@@ -2158,25 +2161,10 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
     try {
       await vc.initialize();
       if (!mounted) return;
-      setState(() {
-        _chewie = ChewieController(
-          videoPlayerController: vc,
-          autoPlay: true,
-          looping: false,
-          allowFullScreen: true,
-          allowPlaybackSpeedChanging: true,
-          materialProgressColors: ChewieProgressColors(
-            playedColor: AppTheme.primary,
-            handleColor: AppTheme.primary,
-            bufferedColor: Colors.white24,
-            backgroundColor: Colors.white12,
-          ),
-          errorBuilder: (context, message) => const Center(
-            child: Text('Video oynatılamadı',
-                style: TextStyle(color: Colors.white70)),
-          ),
-        );
-      });
+      await vc.play();
+      if (!mounted) return;
+      setState(() {});
+      _scheduleHide();
     } catch (_) {
       if (mounted) setState(() => _error = true);
     }
@@ -2184,13 +2172,145 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
 
   @override
   void dispose() {
-    _chewie?.dispose();
+    _hideTimer?.cancel();
     _vc?.dispose();
     super.dispose();
   }
 
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      final vc = _vc;
+      if (mounted && vc != null && vc.value.isPlaying) {
+        setState(() => _controlsVisible = false);
+      }
+    });
+  }
+
+  void _toggleControls() {
+    setState(() => _controlsVisible = !_controlsVisible);
+    if (_controlsVisible) _scheduleHide();
+  }
+
+  Future<void> _togglePlay() async {
+    final vc = _vc;
+    if (vc == null) return;
+    try {
+      final v = vc.value;
+      final ended =
+          v.duration > Duration.zero && v.position >= v.duration;
+      if (v.isPlaying && !ended) {
+        await vc.pause();
+        _hideTimer?.cancel();
+      } else {
+        if (ended) await vc.seekTo(Duration.zero);
+        await vc.play();
+        _scheduleHide();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _cycleSpeed() async {
+    final vc = _vc;
+    if (vc == null) return;
+    _speedIndex = (_speedIndex + 1) % _speeds.length;
+    try {
+      await vc.setPlaybackSpeed(_speeds[_speedIndex]);
+    } catch (_) {}
+    if (mounted) setState(() {});
+    _scheduleHide();
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  Widget _buildControls(VideoPlayerController vc) {
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: vc,
+      builder: (context, v, _) {
+        final pos = v.position;
+        final dur = v.duration;
+        final ended = dur > Duration.zero && pos >= dur;
+        final showPause = v.isPlaying && !ended;
+        final speed = _speeds[_speedIndex];
+
+        return Container(
+          color: Colors.black26,
+          child: SafeArea(
+            child: Column(
+              children: [
+                const Spacer(),
+                IconButton(
+                  iconSize: 64,
+                  color: Colors.white,
+                  icon: Icon(showPause
+                      ? Icons.pause_circle_filled
+                      : Icons.play_circle_filled),
+                  onPressed: _togglePlay,
+                ),
+                const Spacer(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      VideoProgressIndicator(
+                        vc,
+                        allowScrubbing: true,
+                        colors: const VideoProgressColors(
+                          playedColor: AppTheme.primary,
+                          bufferedColor: Colors.white24,
+                          backgroundColor: Colors.white12,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Text(
+                            '${_fmt(pos)} / ${_fmt(dur)}',
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 12),
+                          ),
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: _cycleSpeed,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.white70),
+                              ),
+                              child: Text(
+                                speed == speed.roundToDouble()
+                                    ? '${speed.toInt()}x'
+                                    : '${speed}x',
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 12),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final vc = _vc;
+    final ready = vc != null && vc.value.isInitialized;
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -2198,14 +2318,40 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
       ),
-      body: Center(
-        child: _error
-            ? const Text('Video oynatılamadı',
-                style: TextStyle(color: Colors.white70))
-            : _chewie == null
-                ? const CircularProgressIndicator(color: AppTheme.primary)
-                : Chewie(controller: _chewie!),
-      ),
+      body: _error
+          ? const Center(
+              child: Text('Video oynatılamadı',
+                  style: TextStyle(color: Colors.white70)),
+            )
+          : !ready
+              ? const Center(
+                  child: CircularProgressIndicator(color: AppTheme.primary))
+              : GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _toggleControls,
+                  child: Stack(
+                    children: [
+                      Center(
+                        child: AspectRatio(
+                          aspectRatio: vc.value.aspectRatio > 0
+                              ? vc.value.aspectRatio
+                              : 16 / 9,
+                          child: VideoPlayer(vc),
+                        ),
+                      ),
+                      Positioned.fill(
+                        child: AnimatedOpacity(
+                          opacity: _controlsVisible ? 1 : 0,
+                          duration: const Duration(milliseconds: 200),
+                          child: IgnorePointer(
+                            ignoring: !_controlsVisible,
+                            child: _buildControls(vc),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
     );
   }
 }
