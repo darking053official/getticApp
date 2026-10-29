@@ -1,1 +1,363 @@
+name: Build Gettic - All Platforms
 
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # ==========================================
+  # ANDROID BUILD
+  # ==========================================
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.2'
+          channel: 'stable'
+          cache: true
+      
+      - name: Setup Android
+        run: |
+          flutter create . --project-name gettic --org com.gettic --platforms=android
+          
+          sed -i 's/applicationId ".*"/applicationId "gettic.by.darking053"/' android/app/build.gradle || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
+          sed -i 's/minSdkVersion [0-9]*/minSdkVersion 23/' android/app/build.gradle || true
+          sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.23"/' android/settings.gradle || true
+          
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          
+          # Temel izinleri ekle
+          for perm in \
+            "android.permission.INTERNET" \
+            "android.permission.CAMERA" \
+            "android.permission.RECORD_AUDIO" \
+            "android.permission.READ_EXTERNAL_STORAGE" \
+            "android.permission.READ_MEDIA_IMAGES" \
+            "android.permission.READ_MEDIA_VIDEO" \
+            "android.permission.READ_MEDIA_AUDIO" \
+            "android.permission.POST_NOTIFICATIONS" \
+            "android.permission.SCHEDULE_EXACT_ALARM" \
+            "android.permission.USE_EXACT_ALARM"; do
+            if ! grep -q "$perm" "$MANIFEST"; then
+              sed -i "/<manifest /a \    <uses-permission android:name=\"$perm\" />" "$MANIFEST"
+            fi
+          done
+          
+          # Android 13+ için özel WRITE_EXTERNAL_STORAGE
+          if ! grep -q "android.permission.WRITE_EXTERNAL_STORAGE" "$MANIFEST"; then
+            sed -i '/<manifest /a \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />' "$MANIFEST"
+          fi
+          
+          sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
+          rm -f test/widget_test.dart
+          
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - run: dart run flutter_native_splash:create
+      - run: flutter build apk --release --split-per-abi
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-android-arm64
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-android-armv7
+          path: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-android-x86_64
+          path: build/app/outputs/flutter-apk/app-x86_64-release.apk
+
+  # ==========================================
+  # WINDOWS BUILD
+  # ==========================================
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.2'
+          channel: 'stable'
+          cache: true
+      
+      - name: Setup Windows
+        run: |
+          flutter config --enable-windows-desktop
+          flutter create . --project-name gettic --org com.gettic --platforms=windows
+          Remove-Item -Path test/widget_test.dart -ErrorAction SilentlyContinue
+          
+          $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
+          $files = @("packages\flutter_tools\lib\src\windows\build_windows.dart", "packages\flutter_tools\lib\src\windows\visual_studio.dart")
+          foreach ($f in $files) {
+            $p = Join-Path $flutterRoot $f
+            if (Test-Path $p) {
+              (Get-Content $p -Raw) -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022' | Set-Content $p -NoNewline
+            }
+          }
+          $cacheDir = Join-Path $flutterRoot "bin\cache"
+          Remove-Item -Path "$cacheDir\flutter_tools.stamp" -ErrorAction SilentlyContinue
+          Remove-Item -Path "$cacheDir\flutter_tools.snapshot" -ErrorAction SilentlyContinue
+          
+      - name: Disable flutter_secure_storage for Windows
+        run: |
+          if (Test-Path "pubspec.yaml") {
+            $content = Get-Content pubspec.yaml -Raw
+            $content = $content -replace "flutter_secure_storage: \^9\.0\.0", "# flutter_secure_storage: ^9.0.0"
+            Set-Content pubspec.yaml -Value $content -NoNewline
+          }
+          flutter pub get
+          
+      - run: flutter build windows --release
+      - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath gettic-windows.zip
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-windows
+          path: gettic-windows.zip
+
+  # ==========================================
+  # MACOS BUILD
+  # ==========================================
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.2'
+          channel: 'stable'
+          cache: true
+      
+      - name: Setup macOS
+        run: |
+          flutter config --enable-macos-desktop
+          flutter create . --project-name gettic --org com.gettic --platforms=macos
+          rm -f test/widget_test.dart
+          
+          find macos -name "*.pbxproj" -exec sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = [0-9.]*;/MACOSX_DEPLOYMENT_TARGET = 10.15;/g' {} \;
+          if [ -f "macos/Podfile" ]; then
+            sed -i '' "s/platform :osx, .*/platform :osx, '10.15'/" macos/Podfile
+          fi
+          
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - run: |
+          cd build/macos/Build/Products/Release/
+          zip -r gettic-macos.zip gettic.app
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-macos
+          path: build/macos/Build/Products/Release/gettic-macos.zip
+
+  # ==========================================
+  # LINUX BUILD
+  # ==========================================
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Linux Deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev fuse libfuse2 libsecret-1-dev libjsoncpp-dev
+      
+      - name: Create Fake file_selector_linux Package
+        run: |
+          mkdir -p fake_file_selector_linux/lib
+          cat > fake_file_selector_linux/pubspec.yaml << 'EOF'
+          name: file_selector_linux
+          description: Fake file_selector_linux for Linux build
+          version: 0.9.3+2
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+            flutter: '>=3.0.0'
+          dependencies:
+            flutter:
+              sdk: flutter
+            file_selector_platform_interface: ^2.6.2
+          flutter:
+            plugin:
+              implements: file_selector_linux
+              platforms:
+                linux:
+                  dartPluginClass: FileSelectorLinux
+          EOF
+          cat > fake_file_selector_linux/lib/file_selector_linux.dart << 'EOF'
+          import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
+
+          class FileSelectorLinux extends FileSelectorPlatform {
+            static void registerWith() {
+              FileSelectorPlatform.instance = FileSelectorLinux();
+            }
+
+            @override
+            Future<XFile?> openFile({
+              List<XTypeGroup>? acceptedTypeGroups,
+              String? initialDirectory,
+              String? confirmButtonText,
+            }) async {
+              throw UnimplementedError('File selection not supported on Linux build');
+            }
+
+            @override
+            Future<List<XFile>> openFiles({
+              List<XTypeGroup>? acceptedTypeGroups,
+              String? initialDirectory,
+              String? confirmButtonText,
+            }) async {
+              throw UnimplementedError('File selection not supported on Linux build');
+            }
+
+            @override
+            Future<String?> getSavePath({
+              List<XTypeGroup>? acceptedTypeGroups,
+              String? initialDirectory,
+              String? suggestedName,
+              String? confirmButtonText,
+            }) async {
+              throw UnimplementedError('Save dialog not supported on Linux build');
+            }
+
+            @override
+            Future<String?> getDirectoryPath({
+              String? initialDirectory,
+              String? confirmButtonText,
+            }) async {
+              throw UnimplementedError('Directory selection not supported on Linux build');
+            }
+          }
+          EOF
+          
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.2'
+          channel: 'stable'
+          cache: true
+      
+      - name: Setup Linux
+        run: |
+          flutter config --enable-linux-desktop
+          flutter create . --project-name gettic --org com.gettic --platforms=linux
+          rm -f test/widget_test.dart
+          
+      - name: Add dependency overrides
+        run: |
+          if ! grep -q "url_launcher_linux:" pubspec.yaml; then
+            if grep -q "^dependency_overrides:" pubspec.yaml; then
+              sed -i '/^dependency_overrides:/a \  url_launcher_linux: 3.0.6\n  file_selector_linux:\n    path: ./fake_file_selector_linux' pubspec.yaml
+            else
+              echo "" >> pubspec.yaml
+              echo "dependency_overrides:" >> pubspec.yaml
+              echo "  url_launcher_linux: 3.0.6" >> pubspec.yaml
+              echo "  file_selector_linux:" >> pubspec.yaml
+              echo "    path: ./fake_file_selector_linux" >> pubspec.yaml
+            fi
+          fi
+          
+      - name: Get Dependencies
+        run: flutter pub get
+      
+      - name: Disable -Werror for Linux Build
+        run: |
+          CMAKE_FILE="linux/CMakeLists.txt"
+          if [ -f "$CMAKE_FILE" ]; then
+            sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
+          fi
+          
+      - run: dart run flutter_native_splash:create
+      
+      - name: Build Linux
+        run: |
+          flutter clean
+          flutter pub get
+          flutter build linux --release
+          
+      - name: Create AppImage
+        run: |
+          set -e
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          APPDIR=AppDir
+          mkdir -p $APPDIR/usr/bin $APPDIR/usr/share/applications $APPDIR/usr/share/icons/hicolor/256x256/apps
+          cp -r build/linux/x64/release/bundle/* $APPDIR/usr/bin/
+          cat > $APPDIR/gettic.desktop << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Gettic
+          Exec=gettic
+          Icon=gettic
+          Categories=Network;Chat;InstantMessaging;
+          EOF
+          cp $APPDIR/gettic.desktop $APPDIR/usr/share/applications/
+          if [ -f "assets/logo.png" ]; then
+            cp assets/logo.png $APPDIR/gettic.png
+            cp assets/logo.png $APPDIR/usr/share/icons/hicolor/256x256/apps/gettic.png
+          fi
+          cat > $APPDIR/AppRun << 'EOF'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          exec "${HERE}/usr/bin/gettic" "$@"
+          EOF
+          chmod +x $APPDIR/AppRun
+          ARCH=x86_64 ./appimagetool $APPDIR gettic-linux-x86_64.AppImage
+          
+      - name: Create DEB Package
+        run: |
+          set -e
+          DEB_DIR=gettic-deb
+          mkdir -p $DEB_DIR/DEBIAN $DEB_DIR/usr/bin $DEB_DIR/usr/lib/gettic $DEB_DIR/usr/share/applications $DEB_DIR/usr/share/icons/hicolor/256x256/apps
+          cp -r build/linux/x64/release/bundle/* $DEB_DIR/usr/lib/gettic/
+          cat > $DEB_DIR/usr/bin/gettic << 'EOF'
+          #!/bin/bash
+          exec /usr/lib/gettic/gettic "$@"
+          EOF
+          chmod +x $DEB_DIR/usr/bin/gettic
+          cat > $DEB_DIR/usr/share/applications/gettic.desktop << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Gettic
+          Exec=/usr/bin/gettic
+          Icon=gettic
+          Categories=Network;Chat;InstantMessaging;
+          EOF
+          if [ -f "assets/logo.png" ]; then
+            cp assets/logo.png $DEB_DIR/usr/share/icons/hicolor/256x256/apps/gettic.png
+          fi
+          cat > $DEB_DIR/DEBIAN/control << 'EOF'
+          Package: gettic
+          Version: 1.0.2
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Maintainer: darking053 <writetome@gettic.dpdns.org>
+          Description: Gettic - Gizlilik odaklı mesajlaşma uygulaması
+          Depends: libgtk-3-0, libblkid1, liblzma5, libsecret-1-0
+          EOF
+          chmod 755 $DEB_DIR/DEBIAN
+          chmod 644 $DEB_DIR/DEBIAN/control
+          dpkg-deb --build $DEB_DIR gettic-linux-amd64.deb
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-linux-appimage
+          path: gettic-linux-x86_64.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-linux-deb
+          path: gettic-linux-amd64.deb
