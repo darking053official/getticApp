@@ -711,9 +711,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 subtitle: 'v${AppConstants.appVersion}', onTap: _showAbout),
             _divider(),
             _tile(Icons.article_outlined, 'Açık Kaynak Lisansları', onTap: _showLicenses),
-            _divider(),
-            _tile(Icons.star_outline, 'Uygulamayı Puanla',
-                onTap: () => _snack('Teşekkürler')),
           ]),
 
           _section('TEHLİKELİ BÖLGE', color: Colors.redAccent),
