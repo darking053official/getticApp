@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
 import '../core/theme.dart';
@@ -71,11 +72,7 @@ class _ProfilePageState extends State<ProfilePage> {
       final userId = _service.currentUser?.id;
       if (userId == null) return;
 
-      // Toplam sohbet
       final members = await _service.getMyConversationsWithUnread();
-      final conversationsCount = members.length;
-
-      // Toplam mesaj (kendi gönderdiği)
       int messagesCount = 0;
       for (final m in members) {
         final msgs = await _service.getMessages(m['conversation_id']);
@@ -84,12 +81,12 @@ class _ProfilePageState extends State<ProfilePage> {
 
       if (mounted) {
         setState(() {
-          _totalConversations = conversationsCount;
+          _totalConversations = members.length;
           _totalMessages = messagesCount;
         });
       }
     } catch (e) {
-      print('İstatistik hatası: $e');
+      debugPrint('İstatistik hatası: $e');
     }
   }
 
@@ -98,20 +95,27 @@ class _ProfilePageState extends State<ProfilePage> {
       context: context,
       backgroundColor: AppTheme.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 8),
-            Container(width: 40, height: 4, decoration: BoxDecoration(
-              color: AppTheme.inputBorder, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 16),
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.inputBorder,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
             const Text('Profil Fotoğrafı',
-                style: TextStyle(color: AppTheme.textPrimary,
-                    fontSize: 17, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
+                style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined, color: AppTheme.primary),
               title: const Text('Galeriden Seç',
@@ -134,7 +138,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   await _removeAvatar();
                 },
               ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
           ],
         ),
       ),
@@ -164,7 +168,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (url != null) {
         await _service.updateProfile(userId, {'avatar_url': url});
         await _load();
-        _snack('Profil fotoğrafı güncellendi ✓');
+        _snack('Profil fotoğrafı güncellendi');
       } else {
         _snack('Yükleme başarısız', isError: true);
       }
@@ -189,7 +193,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (userId == null) return;
       await _service.updateProfile(userId, {'avatar_url': null});
       await _load();
-      _snack('Fotoğraf kaldırıldı ✓');
+      _snack('Fotoğraf kaldırıldı');
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
@@ -221,7 +225,7 @@ class _ProfilePageState extends State<ProfilePage> {
       });
 
       await _load();
-      _snack('Profil güncellendi ✓');
+      _snack('Profil güncellendi');
     } catch (e) {
       _snack('Hata: $e', isError: true);
     } finally {
@@ -234,7 +238,7 @@ class _ProfilePageState extends State<ProfilePage> {
     await Clipboard.setData(ClipboardData(
       text: 'Gettic\'te beni bul: @$username\nhttps://gettic.dpdns.org',
     ));
-    _snack('Profil linki kopyalandı ✓');
+    _snack('Profil linki kopyalandı');
   }
 
   void _showFullAvatar() {
@@ -251,6 +255,9 @@ class _ProfilePageState extends State<ProfilePage> {
                 child: CachedNetworkImage(
                   imageUrl: _profile!.avatarUrl!,
                   fit: BoxFit.contain,
+                  placeholder: (_, __) => const Center(
+                    child: CircularProgressIndicator(color: AppTheme.primary),
+                  ),
                 ),
               ),
             ),
@@ -274,6 +281,7 @@ class _ProfilePageState extends State<ProfilePage> {
         content: Text(msg),
         backgroundColor: isError ? Colors.redAccent : AppTheme.primary,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -291,11 +299,15 @@ class _ProfilePageState extends State<ProfilePage> {
         title: Text(title, style: const TextStyle(color: AppTheme.textPrimary)),
         content: Text(content, style: const TextStyle(color: AppTheme.textSecondary)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false),
-              child: const Text('İptal', style: TextStyle(color: AppTheme.textSecondary))),
-          TextButton(onPressed: () => Navigator.pop(c, true),
-              child: Text(confirm, style: TextStyle(
-                  color: isDanger ? Colors.redAccent : AppTheme.primary))),
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('İptal', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: Text(confirm,
+                style: TextStyle(color: isDanger ? Colors.redAccent : AppTheme.primary)),
+          ),
         ],
       ),
     );
@@ -322,184 +334,50 @@ class _ProfilePageState extends State<ProfilePage> {
       backgroundColor: AppTheme.background,
       body: CustomScrollView(
         slivers: [
-          // AppBar (avatar ortalanmış)
-          SliverAppBar(
-            expandedHeight: 220,
-            pinned: true,
-            backgroundColor: AppTheme.background,
-            elevation: 0,
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.share_outlined),
-                onPressed: _shareProfile,
-              ),
-            ],
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primary.withOpacity(0.4),
-                      AppTheme.background,
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ),
-                ),
-                child: SafeArea(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const SizedBox(height: 20),
-                      GestureDetector(
-                        onTap: _showFullAvatar,
-                        child: Stack(
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: AppTheme.primary, width: 3),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppTheme.primary.withOpacity(0.3),
-                                    blurRadius: 20,
-                                    spreadRadius: 4,
-                                  ),
-                                ],
-                              ),
-                              child: CircleAvatar(
-                                radius: 55,
-                                backgroundColor: AppTheme.surface,
-                                backgroundImage: _localAvatar != null
-                                    ? FileImage(_localAvatar!)
-                                    : (_profile?.avatarUrl != null
-                                        ? CachedNetworkImageProvider(
-                                            _profile!.avatarUrl!)
-                                        : null) as ImageProvider?,
-                                child: (_localAvatar == null &&
-                                        _profile?.avatarUrl == null)
-                                    ? Text(
-                                        _profile!.username.isNotEmpty
-                                            ? _profile!.username[0].toUpperCase()
-                                            : '?',
-                                        style: const TextStyle(
-                                          fontSize: 40,
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      )
-                                    : null,
-                              ),
-                            ),
-                            Positioned(
-                              bottom: 0, right: 0,
-                              child: GestureDetector(
-                                onTap: _isUploadingAvatar ? null : _pickAvatar,
-                                child: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primary,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: AppTheme.background, width: 2),
-                                  ),
-                                  child: _isUploadingAvatar
-                                      ? const SizedBox(
-                                          width: 16, height: 16,
-                                          child: CircularProgressIndicator(
-                                              color: Colors.white,
-                                              strokeWidth: 2),
-                                        )
-                                      : const Icon(Icons.camera_alt,
-                                          size: 18, color: Colors.white),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            _profile?.username ?? '',
-                            style: const TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          const Icon(Icons.verified,
-                              color: AppTheme.primary, size: 20),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '@${_profile?.username ?? ''}',
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // İçerik
+          _buildSliverAppBar(),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Bio
-                  if (_profile?.fullName != null &&
-                      _profile!.fullName!.isNotEmpty)
+                  if (_profile?.fullName != null && _profile!.fullName!.isNotEmpty)
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(20),
+                      margin: const EdgeInsets.only(bottom: 20),
                       decoration: BoxDecoration(
                         color: AppTheme.surface,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(20),
                         border: Border.all(color: AppTheme.inputBorder),
                       ),
-                      child: Text(
-                        _profile!.fullName!,
-                        style: const TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 14,
-                          height: 1.5,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('HAKKIMDA',
+                              style: TextStyle(
+                                  color: AppTheme.primary,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.5)),
+                          const SizedBox(height: 8),
+                          Text(
+                            _profile!.fullName!,
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 15,
+                              height: 1.5,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
 
                   // İstatistikler
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppTheme.inputBorder),
-                    ),
-                    child: Row(
-                      children: [
-                        _statItem('$_totalConversations', 'Sohbet'),
-                        _statDivider(),
-                        _statItem('$_totalMessages', 'Mesaj'),
-                        _statDivider(),
-                        _statItem('_', 'Arkadaş'),
-                      ],
-                    ),
-                  ),
+                  _buildStatsCard(),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 24),
 
                   // Kişisel Bilgiler
                   _sectionHeader('KİŞİSEL BİLGİLER'),
@@ -527,7 +405,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ]),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 24),
 
                   // Gizlilik
                   _sectionHeader('GİZLİLİK'),
@@ -567,6 +445,40 @@ class _ProfilePageState extends State<ProfilePage> {
 
                   const SizedBox(height: 24),
 
+                  // Hesap Bilgileri
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.inputBorder),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today_outlined,
+                            color: AppTheme.textSecondary, size: 20),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Hesap Oluşturma',
+                                style: TextStyle(
+                                    color: AppTheme.textSecondary, fontSize: 12)),
+                            Text(
+                              _formatMemberSince(),
+                              style: const TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+
                   // Kaydet Butonu
                   SizedBox(
                     width: double.infinity,
@@ -577,35 +489,24 @@ class _ProfilePageState extends State<ProfilePage> {
                         backgroundColor: AppTheme.primary,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(16),
                         ),
+                        elevation: 4,
+                        shadowColor: AppTheme.primary.withOpacity(0.5),
                       ),
                       child: _isSaving
                           ? const SizedBox(
-                              width: 22, height: 22,
+                              width: 24, height: 24,
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2),
                             )
                           : const Text(
                               'Değişiklikleri Kaydet',
                               style: TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.w600),
+                                  fontSize: 16, fontWeight: FontWeight.bold),
                             ),
                     ),
                   ),
-
-                  const SizedBox(height: 20),
-
-                  // Hesap Bilgileri
-                  Center(
-                    child: Text(
-                      'Hesap oluşturma: ${_formatDate(_service.currentUser?.createdAt)}',
-                      style: const TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 12),
-                    ),
-                  ),
-
-                  const SizedBox(height: 30),
                 ],
               ),
             ),
@@ -615,23 +516,222 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  String _formatDate(String? iso) {
-    if (iso == null) return 'Bilinmiyor';
+  Widget _buildSliverAppBar() {
+    return SliverAppBar(
+      expandedHeight: 280,
+      pinned: true,
+      backgroundColor: AppTheme.background,
+      elevation: 0,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+        onPressed: () => Navigator.pop(context),
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.share_outlined, color: AppTheme.textPrimary),
+          onPressed: _shareProfile,
+        ),
+      ],
+      flexibleSpace: FlexibleSpaceBar(
+        background: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                AppTheme.primary.withOpacity(0.4),
+                AppTheme.background,
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 20),
+                GestureDetector(
+                  onTap: _showFullAvatar,
+                  child: Stack(
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppTheme.primary, width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.primary.withOpacity(0.3),
+                              blurRadius: 20,
+                              spreadRadius: 4,
+                            ),
+                          ],
+                        ),
+                        child: CircleAvatar(
+                          radius: 60,
+                          backgroundColor: AppTheme.surface,
+                          backgroundImage: _localAvatar != null
+                              ? FileImage(_localAvatar!)
+                              : (_profile?.avatarUrl != null
+                                  ? CachedNetworkImageProvider(
+                                      _profile!.avatarUrl!)
+                                  : null) as ImageProvider?,
+                          child: (_localAvatar == null &&
+                                  _profile?.avatarUrl == null)
+                              ? Text(
+                                  _profile!.username.isNotEmpty
+                                      ? _profile!.username[0].toUpperCase()
+                                      : '?',
+                                  style: const TextStyle(
+                                    fontSize: 45,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                )
+                              : null,
+                        ),
+                      ),
+                      Positioned(
+                        bottom: 0, right: 0,
+                        child: GestureDetector(
+                          onTap: _isUploadingAvatar ? null : _pickAvatar,
+                          child: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                  color: AppTheme.background, width: 3),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppTheme.primary.withOpacity(0.5),
+                                  blurRadius: 10,
+                                ),
+                              ],
+                            ),
+                            child: _isUploadingAvatar
+                                ? const SizedBox(
+                                    width: 18, height: 18,
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white, strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.camera_alt,
+                                    size: 22, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _profile?.username ?? '',
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.verified,
+                        color: AppTheme.primary, size: 22),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '@${_profile?.username ?? ''}',
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsCard() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.inputBorder),
+      ),
+      child: Row(
+        children: [
+          _statItem('$_totalConversations', 'Sohbet', Icons.chat_bubble_outline),
+          _statDivider(),
+          _statItem('$_totalMessages', 'Mesaj', Icons.message_outlined),
+          _statDivider(),
+          _statItem(_formatMemberDays(), 'Gün', Icons.calendar_today_outlined),
+        ],
+      ),
+    );
+  }
+
+  String _formatMemberSince() {
     try {
-      final d = DateTime.parse(iso);
-      return '${d.day}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+      final createdAt = _service.currentUser?.createdAt;
+      if (createdAt == null) return 'Bilinmiyor';
+      final date = DateTime.parse(createdAt);
+      return DateFormat('d MMMM yyyy', 'tr_TR').format(date);
     } catch (_) {
       return 'Bilinmiyor';
     }
   }
 
-  Widget _sectionHeader(String text) {
+  String _formatMemberDays() {
+    try {
+      final createdAt = _service.currentUser?.createdAt;
+      if (createdAt == null) return '0';
+      final date = DateTime.parse(createdAt);
+      final days = DateTime.now().difference(date).inDays;
+      return '$days';
+    } catch (_) {
+      return '0';
+    }
+  }
+
+  Widget _statItem(String value, String label, IconData icon) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: AppTheme.primary, size: 20),
+          const SizedBox(height: 8),
+          Text(value,
+              style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(label,
+              style: const TextStyle(
+                  color: AppTheme.textSecondary, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  Widget _statDivider() {
+    return Container(
+      width: 1,
+      height: 40,
+      color: AppTheme.inputBorder,
+    );
+  }
+
+  Widget _sectionHeader(String text, {Color? color}) {
     return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      padding: const EdgeInsets.only(left: 4, bottom: 12),
       child: Text(
         text,
-        style: const TextStyle(
-          color: AppTheme.primary,
+        style: TextStyle(
+          color: color ?? AppTheme.primary,
           fontSize: 11,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.5,
@@ -644,7 +744,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: AppTheme.inputBorder),
       ),
       child: Column(children: children),
@@ -659,17 +759,17 @@ class _ProfilePageState extends State<ProfilePage> {
     int maxLines = 1,
   }) {
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       child: TextField(
         controller: controller,
         maxLines: maxLines,
-        style: const TextStyle(color: AppTheme.textPrimary),
+        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
           labelStyle: const TextStyle(color: AppTheme.textSecondary),
           hintStyle: TextStyle(color: AppTheme.textSecondary.withOpacity(0.5)),
-          prefixIcon: Icon(icon, color: AppTheme.textSecondary, size: 20),
+          prefixIcon: Icon(icon, color: AppTheme.textSecondary, size: 22),
           border: InputBorder.none,
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
@@ -690,7 +790,8 @@ class _ProfilePageState extends State<ProfilePage> {
       secondary: Icon(icon, color: AppTheme.textSecondary, size: 22),
       title: Text(title,
           style: const TextStyle(
-              color: AppTheme.textPrimary, fontSize: 15,
+              color: AppTheme.textPrimary,
+              fontSize: 15,
               fontWeight: FontWeight.w500)),
       subtitle: Text(subtitle,
           style: const TextStyle(
@@ -703,30 +804,4 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _divider() =>
       const Divider(color: AppTheme.inputBorder, height: 1, indent: 56);
-
-  Widget _statItem(String value, String label) {
-    return Expanded(
-      child: Column(
-        children: [
-          Text(value,
-              style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold)),
-          const SizedBox(height: 2),
-          Text(label,
-              style: const TextStyle(
-                  color: AppTheme.textSecondary, fontSize: 12)),
-        ],
-      ),
-    );
-  }
-
-  Widget _statDivider() {
-    return Container(
-      width: 1,
-      height: 30,
-      color: AppTheme.inputBorder,
-    );
-  }
 }
