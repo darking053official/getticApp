@@ -210,7 +210,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _shareApp() async {
     await Clipboard.setData(const ClipboardData(
-      text: 'Gettic - Gizlilik odaklı mesajlaşma. İndir: https://gettic.dpdns.org',
+      text: 'Gettic - Gizlilik odaklı mesajlaşma. İndir: https://gettic.dpdns.org/download',
     ));
     _snack('Davet linki kopyalandı');
   }
@@ -312,7 +312,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
             const SizedBox(height: 12),
             const Text(
-              'Gizlilik odaklı, modern mesajlaşma uygulaması. Flutter + Supabase.',
+              'Gizlilik odaklı, modern mesajlaşma uygulaması.',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
             const SizedBox(height: 12),
