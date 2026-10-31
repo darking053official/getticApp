@@ -39,6 +39,8 @@ dependencies:
   chewie: ^1.8.0
   open_filex: ^4.3.4
   emoji_text_field: ^1.0.0
+  pointycastle: ^3.9.1
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:
