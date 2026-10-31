@@ -50,17 +50,17 @@ dev_dependencies:
 flutter_launcher_icons:
   android: "ic_launcher"
   ios: false
-  image_path: "assets/logo.png"
+  image_path: "assets/logo.jpg"
   min_sdk_android: 23
   adaptive_icon_background: "#0a0a0f"
-  adaptive_icon_foreground: "assets/logo.png"
+  adaptive_icon_foreground: "assets/logo.jpg"
   windows:
     generate: true
-    image_path: "assets/logo.png"
+    image_path: "assets/logo.jpg"
     icon_size: 256
   macos:
     generate: true
-    image_path: "assets/logo.png"
+    image_path: "assets/logo.jpg"
 
 flutter_native_splash:
   color: "#0a0a0f"
@@ -83,7 +83,8 @@ flutter:
     - assets/google.png
     - assets/github.png
     - assets/qr.png
-
+    - assets/logo.jpg
+    
 dependency_overrides:
   record: 5.1.0
   record_android: 1.2.1
