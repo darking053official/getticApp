@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
 import 'chat_list_page.dart';
+import 'notebook_page.dart';
 import 'pass_vault_page.dart';
 import 'settings_page.dart';
 
@@ -60,11 +61,14 @@ class AppsPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            const _AppCard(
+            _AppCard(
               icon: Icons.menu_book_outlined,
               title: 'Notebook',
-              subtitle: 'Yakında',
-              onTap: null,
+              subtitle: 'Kişisel notlar',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NotebookPage()),
+              ),
             ),
           ],
         ),
