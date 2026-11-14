@@ -46,15 +46,13 @@ class _VaultGateState extends State<VaultGate> {
   void initState() {
     super.initState();
     _vault.addListener(_onVaultChanged);
-    _vault.enableAutoLock(after: const Duration(minutes: 2));
     _refreshSetupState();
   }
 
   @override
   void dispose() {
     _vault.removeListener(_onVaultChanged);
-    _vault.disableAutoLock();
-    // Sayfadan çıkınca kasayı kilitle
+    // Sayfadan çıkınca kasayı kilitle (otomatik kilit süresi ayarlardan yönetilir)
     _vault.lock();
     super.dispose();
   }
