@@ -1,4 +1,10 @@
+// ============================================================
+// lib/main.dart
+// (.txt olarak verildi. Projeye eklerken adını main.dart yapın.)
+// ============================================================
+
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -25,21 +31,18 @@ const String oneSignalAppId = "87e2dd8a-b811-49f7-b637-589f3a74d6fe";
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Türkçe tarih formatları
   await initializeDateFormatting('tr_TR', null);
 
-  // Supabase başlat
   await Supabase.initialize(
     url: AppConstants.supabaseUrl,
     anonKey: AppConstants.supabaseAnonKey,
   );
 
-  // Kayıtlı ayarları (tema vb.) runApp'ten önce yükle, açılışta tema titremesin
+  // Ayarlar runApp'ten önce yüklenir: tema titremez
   await AppSettings.instance.ensureLoaded();
 
-  // Google Auth callback (web için)
-  final uri = Uri.base;
-  final code = uri.queryParameters['code'];
+  // Google Auth callback (web)
+  final code = Uri.base.queryParameters['code'];
   if (code != null && code.isNotEmpty) {
     try {
       await Supabase.instance.client.auth.exchangeCodeForSession(code);
@@ -48,32 +51,25 @@ void main() async {
     }
   }
 
-  // OneSignal başlat
+  // OneSignal: açılışı geciktirmemek için beklenmez
   OneSignal.initialize(oneSignalAppId);
+  unawaited(OneSignal.Notifications.requestPermission(true));
 
-  // Bildirim izni iste
-  OneSignal.Notifications.requestPermission(true);
-
-  // Kullanıcı oturum açtıysa OneSignal'a tanıt
   final currentUser = Supabase.instance.client.auth.currentUser;
   if (currentUser != null) {
     OneSignal.login(currentUser.id);
     AppState().setCurrentUserId(currentUser.id);
   }
 
-  // Uygulama hayat döngüsünü dinle
   WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
 
-  // OneSignal ön plan bildirim dinleyicisi
   // Kullanıcı zaten o sohbetteyse bildirimi gösterme
   OneSignal.Notifications.addForegroundWillDisplayListener((event) {
-    final additionalData = event.notification.additionalData;
-    final conversationId = additionalData?['conversation_id'] as String?;
-
+    final conversationId =
+        event.notification.additionalData?['conversation_id'] as String?;
     if (conversationId != null &&
         !AppState().shouldShowNotification(conversationId)) {
       event.preventDefault();
-      debugPrint('Bildirim engellendi (aktif sohbet): $conversationId');
     }
   });
 
@@ -81,7 +77,7 @@ void main() async {
 }
 
 // ==========================================
-// UYGULAMA KÖKÜ (tema ayarlara bağlı)
+// UYGULAMA KÖKÜ (tema ve yazı boyutu ayarlara bağlı)
 // ==========================================
 class GetticApp extends StatelessWidget {
   const GetticApp({super.key});
@@ -101,6 +97,15 @@ class GetticApp extends StatelessWidget {
           themeMode: s.useSystemTheme
               ? ThemeMode.system
               : AppTheme.themeModeFrom(s.themeMode),
+          builder: (context, child) {
+            final mq = MediaQuery.of(context);
+            return MediaQuery(
+              data: mq.copyWith(
+                textScaler: TextScaler.linear(s.fontScale),
+              ),
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
           home: const AuthWrapper(),
         );
       },
@@ -115,19 +120,17 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-
     if (state == AppLifecycleState.resumed) {
       AppState().setAppInForeground(true);
-      debugPrint('AppState: Uygulama ön planda');
     } else if (state == AppLifecycleState.paused) {
       AppState().setAppInForeground(false);
-      debugPrint('AppState: Uygulama arka planda');
     }
   }
 }
 
 // ==========================================
 // AUTH WRAPPER
+// Sabit splash beklemesi yok: oturum durumu bilinince doğrudan açılır.
 // ==========================================
 class AuthWrapper extends ConsumerStatefulWidget {
   const AuthWrapper({super.key});
@@ -137,20 +140,12 @@ class AuthWrapper extends ConsumerStatefulWidget {
 }
 
 class _AuthWrapperState extends ConsumerState<AuthWrapper> {
-  bool _showSplash = true;
   StreamSubscription<AuthState>? _authSubscription;
-  Timer? _splashTimer;
 
   @override
   void initState() {
     super.initState();
 
-    // Kısa splash, sonra oturum durumuna göre yönlendir
-    _splashTimer = Timer(const Duration(milliseconds: 1200), () {
-      if (mounted) setState(() => _showSplash = false);
-    });
-
-    // Oturum değişince OneSignal, AppState ve kasa güncellenir
     _authSubscription =
         Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       final event = data.event;
@@ -159,20 +154,16 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
       if (event == AuthChangeEvent.signedIn && userId != null) {
         OneSignal.login(userId);
         AppState().setCurrentUserId(userId);
-        debugPrint('OneSignal login: $userId');
       } else if (event == AuthChangeEvent.signedOut) {
         OneSignal.logout();
         AppState().reset();
-        // Çıkışta parola kasasını kilitle: kayıtlar bellekte kalmasın
         SecureVault.instance.lock();
-        debugPrint('OneSignal logout');
       }
     });
   }
 
   @override
   void dispose() {
-    _splashTimer?.cancel();
     _authSubscription?.cancel();
     super.dispose();
   }
@@ -180,10 +171,6 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
   @override
   Widget build(BuildContext context) {
     final authStateAsync = ref.watch(authStateProvider);
-
-    if (_showSplash) {
-      return const SplashScreen();
-    }
 
     return authStateAsync.when(
       loading: () => const SplashScreen(),
@@ -195,12 +182,9 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
           ),
         ),
       ),
-      data: (authState) {
-        // Oturum yoksa giriş, varsa uygulama seçim ekranı
-        return authState.session == null
-            ? const AuthPage()
-            : const AppsPage();
-      },
+      data: (authState) => authState.session == null
+          ? const AuthPage()
+          : const AppsPage(),
     );
   }
 }
@@ -225,11 +209,8 @@ class SplashScreen extends StatelessWidget {
               'assets/logo.png',
               width: 100,
               height: 100,
-              errorBuilder: (_, __, ___) => Icon(
-                Icons.message_rounded,
-                size: 100,
-                color: c.primary,
-              ),
+              errorBuilder: (_, __, ___) =>
+                  Icon(Icons.message_rounded, size: 100, color: c.primary),
             ),
             const SizedBox(height: 24),
             Text(
@@ -240,11 +221,6 @@ class SplashScreen extends StatelessWidget {
                 color: c.textPrimary,
                 letterSpacing: -1,
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Yükleniyor...',
-              style: TextStyle(color: c.textSecondary, fontSize: 14),
             ),
             const SizedBox(height: 48),
             CircularProgressIndicator(color: c.primary),
