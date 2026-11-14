@@ -1,11 +1,12 @@
 // ============================================================
 // lib/pages/settings_page.dart
+// (.txt olarak verildi. Projeye eklerken adını settings_page.dart yapın.)
 //
-// Ayarlar: hesap, gizlilik, bildirim, görünüm, veri, dil, gelişmiş.
-// - Tercihler AppSettings üzerinden cihazda kalıcı olarak saklanır.
-// - Hesap ve gizlilik (çevrimiçi / son görülme) sunucudaki profilde saklanır.
-// - Geri tuşu: onBack verilirse onu çağırır, yoksa önceki sayfaya döner.
-// Gerekenler: app_settings.dart, theme.dart, profile_page.dart, constants.dart
+// Her seçenek çalışır:
+//  - Hesap / gizlilik (online, son görülme): sunucudaki profil
+//  - Güvenlik: kasa şifresi değiştirme, otomatik kilit, senkron yönetimi
+//  - Görünüm / medya / bildirim: AppSettings (uygulama genelinde etkili)
+//  - Veri: şifreli dışa aktarma, ayar yedekleme, önbellek yönetimi
 // ============================================================
 
 import 'dart:convert';
@@ -14,18 +15,24 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/app_settings.dart';
 import '../core/constants.dart';
+import '../core/security.dart';
 import '../core/theme.dart';
 import '../models/profile.dart';
+import '../services/pass_sync.dart';
 import '../services/supabase_service.dart';
 import 'profile_page.dart';
 
+const String _kExportPrefix = 'GETTIC-EXPORT-1:';
+
 class SettingsPage extends StatefulWidget {
   /// Sekme olarak gösterildiğinde geri tuşu bu callback'i çağırır.
-  /// Normal (push ile açılan) kullanımda boş bırakılır.
+  /// Push ile açıldığında boş bırakılır.
   final VoidCallback? onBack;
 
   const SettingsPage({super.key, this.onBack});
@@ -40,17 +47,24 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Profile? _profile;
   bool _loadingProfile = true;
-  String _cacheSize = 'Hesaplanıyor...';
-
-  // Sunucudaki gizlilik ayarları (profil)
   bool _showOnline = true;
   bool _showLastSeen = true;
+  int _cacheBytes = -1; // -1: hesaplanıyor
+  bool _busy = false;
+
+  static const Map<int, String> _lockOptions = {
+    0: 'Kapalı',
+    1: '1 dakika',
+    2: '2 dakika',
+    5: '5 dakika',
+    15: '15 dakika',
+  };
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
-    _calculateCache();
+    _refreshCacheSize();
   }
 
   // ==========================================
@@ -71,26 +85,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _calculateCache() async {
-    try {
-      final dir =
-          Directory('${Directory.systemTemp.path}/cached_network_images');
-      var total = 0;
-      if (await dir.exists()) {
-        await for (final f in dir.list(recursive: true)) {
-          if (f is File) total += await f.length();
-        }
-      }
-      if (mounted) {
-        setState(() => _cacheSize =
-            '${(total / 1024 / 1024).toStringAsFixed(1)} MB');
-      }
-    } catch (_) {
-      if (mounted) setState(() => _cacheSize = '0 MB');
-    }
-  }
-
-  Future<void> _updateOnlinePrivacy() async {
+  Future<void> _savePrivacy() async {
     try {
       await _service.updatePrivacySettings(
         showOnline: _showOnline,
@@ -101,32 +96,50 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // ==========================================
-  // HESAP İŞLEMLERİ
-  // ==========================================
-  Future<void> _sendPasswordResetEmail() async {
-    final email = _service.currentUser?.email;
-    if (email == null || email.isEmpty) {
-      _snack('E-posta bulunamadı', isError: true);
-      return;
+  /// flutter_cache_manager'ın varsayılan klasörü (cached_network_image bunu kullanır)
+  Future<int> _measureCache() async {
+    try {
+      final tmp = await getTemporaryDirectory();
+      final dir = Directory('${tmp.path}/libCachedImageData');
+      var total = 0;
+      if (await dir.exists()) {
+        await for (final f in dir.list(recursive: true)) {
+          if (f is File) total += await f.length();
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
     }
+  }
+
+  Future<void> _refreshCacheSize() async {
+    final bytes = await _measureCache();
+    if (mounted) setState(() => _cacheBytes = bytes);
+  }
+
+  Future<void> _clearCache() async {
     final ok = await _confirm(
-      title: 'Şifre sıfırla',
-      content: '$email adresine sıfırlama bağlantısı gönderilsin mi?',
-      confirm: 'Gönder',
+      title: 'Önbelleği temizle',
+      content: 'İndirilmiş resim ve medya önbelleği silinecek. Mesajlar etkilenmez.',
+      confirm: 'Temizle',
     );
     if (ok != true) return;
     try {
-      await Supabase.instance.client.auth.resetPasswordForEmail(
-        email,
-        redirectTo: 'gettic://reset-password',
-      );
-      _snack('Sıfırlama e-postası gönderildi');
+      await DefaultCacheManager().emptyCache();
+      PaintingBinding.instance.imageCache
+        ..clear()
+        ..clearLiveImages();
+      await _refreshCacheSize();
+      _snack('Önbellek temizlendi');
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
   }
 
+  // ==========================================
+  // HESAP
+  // ==========================================
   Future<void> _changeEmail() async {
     final controller =
         TextEditingController(text: _service.currentUser?.email ?? '');
@@ -136,8 +149,7 @@ class _SettingsPageState extends State<SettingsPage> {
         final c = ctx.appColors;
         return AlertDialog(
           backgroundColor: c.surface,
-          title: Text('E-posta değiştir',
-              style: TextStyle(color: c.textPrimary)),
+          title: Text('E-posta değiştir', style: TextStyle(color: c.textPrimary)),
           content: TextField(
             controller: controller,
             keyboardType: TextInputType.emailAddress,
@@ -158,7 +170,7 @@ class _SettingsPageState extends State<SettingsPage> {
       },
     );
     controller.dispose();
-    if (result == null || result.isEmpty || !result.contains('@')) return;
+    if (result == null || !result.contains('@')) return;
     try {
       await Supabase.instance.client.auth
           .updateUser(UserAttributes(email: result));
@@ -168,13 +180,83 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  Future<void> _sendPasswordResetEmail() async {
+    final email = _service.currentUser?.email;
+    if (email == null || email.isEmpty) {
+      _snack('E-posta bulunamadı', isError: true);
+      return;
+    }
+    final ok = await _confirm(
+      title: 'Şifre sıfırla',
+      content: '$email adresine sıfırlama bağlantısı gönderilsin mi?',
+      confirm: 'Gönder',
+    );
+    if (ok != true) return;
+    try {
+      await Supabase.instance.client.auth.resetPasswordForEmail(email);
+      _snack('Sıfırlama e-postası gönderildi');
+    } catch (e) {
+      _snack('Hata: $e', isError: true);
+    }
+  }
+
+  Future<void> _showActiveSessions() async {
+    final c = context.appColors;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: Text('Aktif oturumlar', style: TextStyle(color: c.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.phone_android, color: c.online),
+              title: Text('Bu cihaz', style: TextStyle(color: c.textPrimary)),
+              subtitle: Text('Şu an aktif',
+                  style: TextStyle(color: c.textSecondary, fontSize: 12)),
+            ),
+            Divider(color: c.border),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.logout, color: c.danger),
+              title: Text('Tüm oturumları kapat',
+                  style: TextStyle(color: c.danger)),
+              subtitle: Text('Tüm cihazlardan çıkış yap',
+                  style: TextStyle(color: c.textSecondary, fontSize: 12)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                try {
+                  await Supabase.instance.client.auth
+                      .signOut(scope: SignOutScope.global);
+                } catch (e) {
+                  _snack('Hata: $e', isError: true);
+                }
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tamam'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _signOut() async {
     final ok = await _confirm(
       title: 'Çıkış yap',
       content: 'Çıkış yapmak istediğine emin misin?',
       confirm: 'Çıkış',
     );
-    if (ok == true) await _service.signOut();
+    if (ok == true) {
+      SecureVault.instance.lock();
+      await _service.signOut();
+    }
   }
 
   Future<void> _deleteAccount() async {
@@ -194,97 +276,133 @@ class _SettingsPageState extends State<SettingsPage> {
             .delete()
             .eq('id', userId);
       }
+      SecureVault.instance.lock();
       await _service.deleteAccount();
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
   }
 
-  Future<void> _showActiveSessions() async {
+  // ==========================================
+  // GÜVENLİK
+  // ==========================================
+  Future<void> _changeVaultPassword() async {
+    final old = await _askPassword(
+      title: 'Mevcut kasa şifresi',
+      hint: 'Mevcut şifren',
+    );
+    if (old == null) return;
+
+    final neu = await _askPassword(
+      title: 'Yeni kasa şifresi',
+      hint: 'En az 8 karakter',
+      withConfirm: true,
+    );
+    if (neu == null) return;
+
+    setState(() => _busy = true);
+    try {
+      await SecureVault.instance.changeSecret(old, neu);
+      // Senkron açıksa sunucudaki kopya yeni şifreyle yeniden şifrelenir
+      if (await PassSync.instance.isEnabled()) {
+        await PassSync.instance.rekey(neu);
+      }
+      _snack('Kasa şifresi değiştirildi');
+    } on SecurityException catch (e) {
+      _snack(e.message, isError: true);
+    } catch (e) {
+      _snack('Hata: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _lockVaultNow() {
+    SecureVault.instance.lock();
+    _snack('Kasa kilitlendi');
+  }
+
+  Future<bool?> _syncEnabledState() async {
+    if (!SecureVault.instance.isUnlocked) return null;
+    return PassSync.instance.isEnabled();
+  }
+
+  Future<void> _syncMenu(bool enabled) async {
+    if (!enabled) {
+      _snack('Senkronu Parola Kasası ekranından açabilirsin');
+      return;
+    }
     final c = context.appColors;
-    await showDialog<void>(
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: c.surface,
-        title: Text('Aktif oturumlar',
-            style: TextStyle(color: c.textPrimary)),
-        content: Column(
+      backgroundColor: c.surface,
+      builder: (ctx) => SafeArea(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.phone_android, color: c.online),
-              title: Text('Bu cihaz',
+              leading: Icon(Icons.sync, color: c.primary),
+              title: Text('Şimdi senkronize et',
                   style: TextStyle(color: c.textPrimary)),
-              subtitle: Text('Şu an aktif',
-                  style: TextStyle(color: c.textSecondary, fontSize: 12)),
-            ),
-            Divider(color: c.border),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.logout, color: c.danger),
-              title: Text('Tüm oturumları kapat',
-                  style: TextStyle(color: c.danger)),
-              subtitle: Text('Tüm cihazlardan çıkış yap',
-                  style: TextStyle(color: c.textSecondary, fontSize: 12)),
               onTap: () async {
                 Navigator.pop(ctx);
                 try {
-                  await Supabase.instance.client.auth
-                      .signOut(scope: SignOutScope.global);
-                  _snack('Tüm oturumlar kapatıldı');
-                } catch (e) {
-                  _snack('Hata: $e', isError: true);
+                  await PassSync.instance.sync();
+                  _snack('Senkronize edildi');
+                } on SecurityException catch (e) {
+                  _snack(e.message, isError: true);
+                } catch (_) {
+                  _snack('Senkron yapılamadı. Bağlantını kontrol et.',
+                      isError: true);
                 }
+                if (mounted) setState(() {});
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.sync_disabled, color: c.danger),
+              title: Text('Senkronu kapat', style: TextStyle(color: c.danger)),
+              subtitle: Text('Sunucudaki kopya silinmez',
+                  style: TextStyle(color: c.textSecondary, fontSize: 12)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await PassSync.instance.disable();
+                _snack('Senkron kapatıldı');
+                if (mounted) setState(() {});
               },
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Tamam'),
-          ),
-        ],
       ),
     );
   }
 
   // ==========================================
-  // VERİ / YEDEK
+  // VERİ DIŞA / İÇE AKTARMA
   // ==========================================
-  Future<void> _clearCache() async {
-    final ok = await _confirm(
-      title: 'Önbelleği temizle',
-      content: 'Tüm geçici dosyalar silinecek.',
-      confirm: 'Temizle',
+  /// Profil + mesajlar + ayarlar, parolayla şifrelenip panoya kopyalanır.
+  Future<void> _exportEncrypted() async {
+    final pw = await _askPassword(
+      title: 'Dışa aktarma şifresi',
+      hint: 'Dosyayı açmak için bu şifre gerekir',
+      withConfirm: true,
     );
-    if (ok != true) return;
-    try {
-      PaintingBinding.instance.imageCache.clear();
-      PaintingBinding.instance.imageCache.clearLiveImages();
-      await _calculateCache();
-      _snack('Önbellek temizlendi');
-    } catch (e) {
-      _snack('Hata: $e', isError: true);
-    }
-  }
+    if (pw == null) return;
 
-  Future<void> _backupChats() async {
-    final ok = await _confirm(
-      title: 'Sohbetleri yedekle',
-      content: 'Tüm mesajların JSON olarak panoya kopyalanacak.',
-      confirm: 'Yedekle',
-    );
-    if (ok != true) return;
+    setState(() => _busy = true);
     try {
-      final userId = _service.currentUser?.id;
-      if (userId == null) return;
+      final uid = _service.currentUser?.id;
+      if (uid == null) throw Exception('Oturum bulunamadı');
+
+      final profile = await Supabase.instance.client
+          .from(AppConstants.tableProfiles)
+          .select()
+          .eq('id', uid)
+          .single();
 
       final members = await Supabase.instance.client
           .from(AppConstants.tableConversationMembers)
           .select('conversation_id')
-          .eq('user_id', userId);
+          .eq('user_id', uid);
 
       final messages = <Map<String, dynamic>>[];
       for (final m in members) {
@@ -296,75 +414,101 @@ class _SettingsPageState extends State<SettingsPage> {
         messages.addAll(List<Map<String, dynamic>>.from(rows));
       }
 
-      final backup = {
-        'user': _profile?.username,
+      final payload = jsonEncode({
+        'app': 'gettic',
+        'version': AppConstants.appVersion,
         'exported_at': DateTime.now().toIso8601String(),
-        'total_messages': messages.length,
+        'email': _service.currentUser?.email,
+        'profile': profile,
+        'settings': _s.toJson(),
         'messages': messages,
-      };
-      await Clipboard.setData(ClipboardData(text: jsonEncode(backup)));
-      _snack('${messages.length} mesaj kopyalandı');
+      });
+
+      final enc = await Crypto.encryptStringWithPassword(payload, pw);
+      await Clipboard.setData(ClipboardData(text: '$_kExportPrefix$enc'));
+      _snack('Şifreli dışa aktarım kopyalandı (${messages.length} mesaj)');
     } catch (e) {
-      _snack('Hata: $e', isError: true);
+      _snack('Dışa aktarılamadı: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _downloadMyData() async {
+  Future<void> _exportSettings() async {
+    await Clipboard.setData(
+        ClipboardData(text: jsonEncode({'app': 'gettic', 'settings': _s.toJson()})));
+    _snack('Ayarlar panoya kopyalandı');
+  }
+
+  Future<void> _importSettings() async {
+    final ctrl = TextEditingController();
+    final c = context.appColors;
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: Text('Ayarları içe aktar', style: TextStyle(color: c.textPrimary)),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 5,
+          decoration: InputDecoration(
+            hintText: 'Dışa aktarılmış ayar metnini buraya yapıştır',
+            suffixIcon: IconButton(
+              tooltip: 'Panodan yapıştır',
+              icon: const Icon(Icons.content_paste),
+              onPressed: () async {
+                final d = await Clipboard.getData(Clipboard.kTextPlain);
+                if (d?.text != null) ctrl.text = d!.text!;
+              },
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('İptal'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('Uygula'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (text == null || text.trim().isEmpty) return;
+
+    try {
+      final map = jsonDecode(text) as Map<String, dynamic>;
+      final settings = map['settings'];
+      if (map['app'] != 'gettic' || settings is! Map) {
+        throw const FormatException('Geçersiz ayar dosyası');
+      }
+      await _s.importJson(Map<String, dynamic>.from(settings));
+      _snack('Ayarlar uygulandı');
+    } catch (_) {
+      _snack('Geçersiz ayar metni', isError: true);
+    }
+  }
+
+  Future<void> _resetSettings() async {
     final ok = await _confirm(
-      title: 'Verilerimi indir',
-      content: 'Profil ve e-posta bilgilerin JSON olarak panoya kopyalanacak.',
-      confirm: 'İndir',
+      title: 'Ayarları sıfırla',
+      content: 'Tüm uygulama ayarları varsayılan değerlere döner. Hesabın ve mesajların etkilenmez.',
+      confirm: 'Sıfırla',
+      isDanger: true,
     );
     if (ok != true) return;
-    try {
-      final userId = _service.currentUser?.id;
-      if (userId == null) return;
-      final profile = await Supabase.instance.client
-          .from(AppConstants.tableProfiles)
-          .select()
-          .eq('id', userId)
-          .single();
-      final data = {
-        'profile': profile,
-        'email': _service.currentUser?.email,
-        'exported_at': DateTime.now().toIso8601String(),
-      };
-      await Clipboard.setData(ClipboardData(text: jsonEncode(data)));
-      _snack('Verilerin kopyalandı');
-    } catch (e) {
-      _snack('Hata: $e', isError: true);
-    }
+    await _s.reset();
+    _snack('Ayarlar sıfırlandı');
   }
 
   // ==========================================
   // DESTEK / HAKKINDA
   // ==========================================
-  Future<void> _shareApp() async {
-    await Clipboard.setData(const ClipboardData(
-      text: 'Gettic - Gizlilik odaklı mesajlaşma. İndir: https://gettic.dpdns.org',
-    ));
-    _snack('Davet linki kopyalandı');
-  }
-
-  Future<void> _contactSupport() async {
-    await Clipboard.setData(
-        const ClipboardData(text: 'writetome@gettic.dpdns.org'));
-    _snack('Adres kopyalandı');
-  }
-
-  Future<void> _reportBug() async {
-    final body = 'Uygulama: ${AppConstants.appName} v${AppConstants.appVersion}\n'
-        'Cihaz: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}\n'
-        'Kullanıcı: ${_profile?.username ?? '-'}\n\nHata açıklaması:\n';
-    await Clipboard.setData(ClipboardData(text: 'Konu: Hata bildirimi\n\n$body'));
-    _snack('Hata şablonu kopyalandı. writetome@gettic.dpdns.org adresine gönder');
-  }
-
-  Future<void> _requestFeature() async {
-    await Clipboard.setData(const ClipboardData(
-      text: 'Konu: Özellik isteği\n\nİstediğim özellik: ',
-    ));
-    _snack('Şablon kopyalandı. writetome@gettic.dpdns.org adresine gönder');
+  Future<void> _copy(String text, String message) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    _snack(message);
   }
 
   void _showLicenses() {
@@ -372,7 +516,6 @@ class _SettingsPageState extends State<SettingsPage> {
       context: context,
       applicationName: AppConstants.appName,
       applicationVersion: AppConstants.appVersion,
-      applicationIcon: Image.asset('assets/logo.png', width: 40, height: 40),
     );
   }
 
@@ -399,13 +542,10 @@ class _SettingsPageState extends State<SettingsPage> {
             Text('Kullanıcı: ${_profile?.username ?? '-'}',
                 style: TextStyle(color: c.textSecondary, fontSize: 13)),
             const SizedBox(height: 12),
-            Text(
-              'Gizlilik odaklı mesajlaşma. Flutter ve Supabase ile geliştirildi.',
-              style: TextStyle(color: c.textSecondary, fontSize: 13),
-            ),
+            Text('Gizlilik odaklı mesajlaşma. Flutter ve Supabase ile geliştirildi.',
+                style: TextStyle(color: c.textSecondary, fontSize: 13)),
             const SizedBox(height: 12),
-            Text('© 2026 Gettic',
-                style: TextStyle(color: c.textHint, fontSize: 11)),
+            Text('© 2026 Gettic', style: TextStyle(color: c.textHint, fontSize: 11)),
           ],
         ),
         actions: [
@@ -419,16 +559,16 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ==========================================
-  // SEÇİM / DİYALOG YARDIMCILARI
+  // DİYALOG YARDIMCILARI
   // ==========================================
-  void _selectOption({
+  Future<T?> _pick<T>({
     required String title,
-    required List<String> options,
-    required String current,
-    required void Function(String) onSelect,
+    required Map<T, String> options,
+    required T current,
+    required void Function(T) onSelect,
   }) {
     final c = context.appColors;
-    showDialog<void>(
+    return showDialog<T>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: c.surface,
@@ -439,15 +579,15 @@ class _SettingsPageState extends State<SettingsPage> {
           child: ListView(
             shrinkWrap: true,
             children: [
-              for (final o in options)
-                RadioListTile<String>(
-                  value: o,
+              for (final e in options.entries)
+                RadioListTile<T>(
+                  value: e.key,
                   groupValue: current,
                   activeColor: c.primary,
-                  title: Text(o, style: TextStyle(color: c.textPrimary)),
+                  title: Text(e.value, style: TextStyle(color: c.textPrimary)),
                   onChanged: (v) {
+                    Navigator.pop(ctx, v);
                     if (v != null) onSelect(v);
-                    Navigator.pop(ctx);
                   },
                 ),
             ],
@@ -470,8 +610,7 @@ class _SettingsPageState extends State<SettingsPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('Önizleme: Merhaba!',
-                  style: TextStyle(
-                      color: c.textPrimary, fontSize: 16 * value)),
+                  style: TextStyle(color: c.textPrimary, fontSize: 16 * value)),
               Slider(
                 value: value,
                 min: 0.8,
@@ -501,6 +640,87 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  /// Parola sorar. [withConfirm] true ise tekrar ister ve güç kontrolü yapar.
+  Future<String?> _askPassword({
+    required String title,
+    required String hint,
+    bool withConfirm = false,
+  }) async {
+    final c = context.appColors;
+    final first = TextEditingController();
+    final second = TextEditingController();
+    String? error;
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          backgroundColor: c.surface,
+          title: Text(title, style: TextStyle(color: c.textPrimary)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: first,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(hintText: hint),
+              ),
+              if (withConfirm) ...[
+                const SizedBox(height: 10),
+                TextField(
+                  controller: second,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(hintText: 'Tekrar gir'),
+                ),
+              ],
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(error!,
+                      style: TextStyle(color: c.danger, fontSize: 12)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('İptal'),
+            ),
+            TextButton(
+              onPressed: () {
+                final v = first.text;
+                if (v.isEmpty) {
+                  setSt(() => error = 'Boş bırakma');
+                  return;
+                }
+                if (withConfirm) {
+                  if (v.length < 8 ||
+                      !PasswordReport.evaluate(v).isAcceptable) {
+                    setSt(() => error = 'Daha güçlü bir şifre seç (en az 8 karakter)');
+                    return;
+                  }
+                  if (second.text != v) {
+                    setSt(() => error = 'Şifreler eşleşmiyor');
+                    return;
+                  }
+                }
+                Navigator.pop(ctx, v);
+              },
+              child: Text('Onayla', style: TextStyle(color: c.primary)),
+            ),
+          ],
+        ),
+      ),
+    );
+    first.dispose();
+    second.dispose();
+    return result;
+  }
+
   Future<bool?> _confirm({
     required String title,
     required String content,
@@ -521,8 +741,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(confirm,
-                style: TextStyle(color: isDanger ? c.danger : c.primary)),
+            child: Text(confirm, style: TextStyle(color: isDanger ? c.danger : c.primary)),
           ),
         ],
       ),
@@ -549,6 +768,13 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  String _formatBytes(int b) {
+    if (b < 0) return 'Hesaplanıyor...';
+    if (b < 1024) return '$b B';
+    if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(1)} KB';
+    return '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+
   // ==========================================
   // UI
   // ==========================================
@@ -566,298 +792,241 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         title: const Text('Ayarlar'),
       ),
-      body: ListenableBuilder(
-        listenable: _s,
-        builder: (context, _) {
-          return ListView(
-            padding: const EdgeInsets.only(bottom: 32),
-            children: [
-              if (_loadingProfile)
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                    child: CircularProgressIndicator(color: c.primary),
+      body: Stack(
+        children: [
+          ListenableBuilder(
+            listenable: _s,
+            builder: (context, _) => ListView(
+              padding: const EdgeInsets.only(bottom: 32),
+              children: [
+                if (_loadingProfile)
+                  Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator(color: c.primary)),
+                  )
+                else if (_profile != null)
+                  _profileCard(c),
+
+                _section('Hesap', c),
+                _card(c, [
+                  _tile(c, Icons.alternate_email, 'E-posta adresi',
+                      subtitle: _service.currentUser?.email ?? '',
+                      onTap: _changeEmail),
+                  _divider(c),
+                  _tile(c, Icons.lock_reset, 'Hesap şifresini sıfırla',
+                      subtitle: 'E-posta ile sıfırlama bağlantısı al',
+                      onTap: _sendPasswordResetEmail),
+                  _divider(c),
+                  _tile(c, Icons.person_outline, 'Profil bilgileri',
+                      subtitle: 'Kullanıcı adı, durum, avatar',
+                      onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const ProfilePage()),
+                          ).then((_) => _loadProfile())),
+                  _divider(c),
+                  _tile(c, Icons.devices_outlined, 'Aktif oturumlar',
+                      subtitle: 'Cihazları yönet', onTap: _showActiveSessions),
+                ]),
+
+                _section('Gizlilik', c),
+                _card(c, [
+                  _switch(c, Icons.visibility_outlined, 'Çevrimiçi durumu göster',
+                      subtitle: 'Kapalıyken çevrimiçi görünmezsin',
+                      value: _showOnline, onChanged: (v) {
+                    setState(() => _showOnline = v);
+                    _savePrivacy();
+                  }),
+                  _divider(c),
+                  _switch(c, Icons.access_time, 'Son görülmeyi göster',
+                      value: _showLastSeen, onChanged: (v) {
+                    setState(() => _showLastSeen = v);
+                    _savePrivacy();
+                  }),
+                  _divider(c),
+                  _switch(c, Icons.done_all, 'Okundu bilgisi',
+                      subtitle: 'Kapalıyken mesajlar okundu işaretlenmez',
+                      value: _s.showReadReceipts,
+                      onChanged: (v) => _s.update(() => _s.showReadReceipts = v)),
+                  _divider(c),
+                  _switch(c, Icons.edit_outlined, 'Yazıyor göstergesi',
+                      subtitle: 'Yazarken karşı tarafa göster',
+                      value: _s.showTypingIndicator,
+                      onChanged: (v) =>
+                          _s.update(() => _s.showTypingIndicator = v)),
+                ]),
+
+                _section('Güvenlik', c),
+                _card(c, [
+                  _tile(c, Icons.key_outlined, 'Kasa şifresini değiştir',
+                      subtitle: 'Notebook ve Parola Kasası için ortak şifre',
+                      onTap: _busy ? null : _changeVaultPassword),
+                  _divider(c),
+                  _tile(c, Icons.timer_outlined, 'Otomatik kilit',
+                      subtitle: 'Uygulama bu süre arka planda kalınca kasa kilitlenir: '
+                          '${_lockOptions[_s.autoLockMinutes] ?? ''}',
+                      onTap: () => _pick<int>(
+                            title: 'Otomatik kilit',
+                            options: _lockOptions,
+                            current: _s.autoLockMinutes,
+                            onSelect: (v) =>
+                                _s.update(() => _s.autoLockMinutes = v),
+                          )),
+                  _divider(c),
+                  _tile(c, Icons.lock_outline, 'Kasayı şimdi kilitle',
+                      onTap: _lockVaultNow),
+                  _divider(c),
+                  FutureBuilder<bool?>(
+                    future: _syncEnabledState(),
+                    builder: (context, snap) {
+                      final state = snap.data;
+                      final subtitle = state == null
+                          ? 'Görmek için kasayı aç'
+                          : (state ? 'Açık: parolalar eşitleniyor' : 'Kapalı');
+                      return _tile(c, Icons.sync, 'Parola senkronu',
+                          subtitle: subtitle,
+                          onTap: state == null
+                              ? null
+                              : () => _syncMenu(state));
+                    },
                   ),
-                )
-              else if (_profile != null)
-                _profileCard(c),
+                ]),
 
-              _section('Hesap', c),
-              _card(c, [
-                _tile(c, Icons.alternate_email, 'E-posta adresi',
-                    subtitle: _service.currentUser?.email ?? '',
-                    onTap: _changeEmail),
-                _divider(c),
-                _tile(c, Icons.lock_outline, 'Şifre sıfırla',
-                    subtitle: 'E-posta ile sıfırlama bağlantısı al',
-                    onTap: _sendPasswordResetEmail),
-                _divider(c),
-                _tile(c, Icons.person_outline, 'Profil bilgileri',
-                    subtitle: 'Kullanıcı adı, durum, avatar',
-                    onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const ProfilePage()),
-                        ).then((_) => _loadProfile())),
-              ]),
+                _section('Bildirimler', c),
+                _card(c, [
+                  _switch(c, Icons.notifications_active_outlined,
+                      'Uygulama içi bildirimler',
+                      subtitle: 'Kapalıyken uygulama açıkken bildirim gelmez',
+                      value: _s.inAppNotifications,
+                      onChanged: (v) =>
+                          _s.update(() => _s.inAppNotifications = v)),
+                  _divider(c),
+                  _tile(c, Icons.info_outline, 'Ses ve titreşim',
+                      subtitle: 'Telefonun Ayarlar > Bildirimler > Gettic bölümünden yönetilir',
+                      trailing: false),
+                ]),
 
-              _section('Gizlilik', c),
-              _card(c, [
-                _switch(c, Icons.visibility_outlined,
-                    'Çevrimiçi durumu göster',
-                    subtitle: 'Kapalıyken çevrimiçi görünmezsin',
-                    value: _showOnline, onChanged: (v) {
-                  setState(() => _showOnline = v);
-                  _updateOnlinePrivacy();
-                }),
-                _divider(c),
-                _switch(c, Icons.access_time, 'Son görülmeyi göster',
-                    subtitle: 'Son görülme zamanın gizlenir',
-                    value: _showLastSeen, onChanged: (v) {
-                  setState(() => _showLastSeen = v);
-                  _updateOnlinePrivacy();
-                }),
-                _divider(c),
-                _switch(c, Icons.done_all, 'Okundu bilgisi',
-                    subtitle: 'Mavi tikler gösterilsin mi?',
-                    value: _s.showReadReceipts,
-                    onChanged: (v) => _s.update(
-                        () => _s.showReadReceipts = v)),
-                _divider(c),
-                _switch(c, Icons.edit_outlined, 'Yazıyor göstergesi',
-                    subtitle: 'Yazarken karşı tarafa göster',
-                    value: _s.showTypingIndicator,
-                    onChanged: (v) => _s.update(
-                        () => _s.showTypingIndicator = v)),
-                _divider(c),
-                _switch(c, Icons.block, 'Bilinmeyenlerden mesajı engelle',
-                    subtitle: 'Yalnızca tanıdığın kişiler mesaj atabilsin',
-                    value: _s.blockUnknownMessages,
-                    onChanged: (v) => _s.update(
-                        () => _s.blockUnknownMessages = v)),
-              ]),
+                _section('Görünüm', c),
+                _card(c, [
+                  _switch(c, Icons.brightness_auto, 'Sistem temasını kullan',
+                      value: _s.useSystemTheme,
+                      onChanged: (v) => _s.update(() => _s.useSystemTheme = v)),
+                  _divider(c),
+                  _tile(c, Icons.palette_outlined, 'Tema',
+                      subtitle: _s.useSystemTheme ? 'Sistem ayarını izliyor' : _s.themeMode,
+                      onTap: _s.useSystemTheme
+                          ? null
+                          : () => _pick<String>(
+                                title: 'Tema',
+                                options: const {
+                                  'Karanlık': 'Karanlık',
+                                  'Aydınlık': 'Aydınlık',
+                                },
+                                current: _s.themeMode,
+                                onSelect: (v) => _s.update(() => _s.themeMode = v),
+                              )),
+                  _divider(c),
+                  _tile(c, Icons.text_fields, 'Yazı boyutu',
+                      subtitle: '${(_s.fontScale * 100).round()}%',
+                      onTap: _showFontDialog),
+                ]),
 
-              _section('Bildirimler', c),
-              _card(c, [
-                _switch(c, Icons.notifications_active_outlined,
-                    'Bildirim sesi',
-                    value: _s.notifSound,
-                    onChanged: (v) =>
-                        _s.update(() => _s.notifSound = v)),
-                _divider(c),
-                _tile(c, Icons.music_note_outlined, 'Ses tonu',
-                    subtitle: _s.notifSoundTone,
-                    onTap: () => _selectOption(
-                          title: 'Bildirim sesi',
-                          options: const [
-                            'Varsayılan',
-                            'Sessiz',
-                            'Ping',
-                            'Ding',
-                            'Pop'
-                          ],
-                          current: _s.notifSoundTone,
-                          onSelect: (v) => _s.update(
-                              () => _s.notifSoundTone = v),
-                        )),
-                _divider(c),
-                _switch(c, Icons.vibration, 'Titreşim',
-                    value: _s.notifVibrate,
-                    onChanged: (v) =>
-                        _s.update(() => _s.notifVibrate = v)),
-                _divider(c),
-                _switch(c, Icons.message_outlined, 'Mesaj önizleme',
-                    subtitle: 'Bildirimde mesaj içeriğini göster',
-                    value: _s.notifPreview,
-                    onChanged: (v) =>
-                        _s.update(() => _s.notifPreview = v)),
-                _divider(c),
-                _switch(c, Icons.lightbulb_outline, 'LED bildirimi',
-                    value: _s.notifLed,
-                    onChanged: (v) => _s.update(() => _s.notifLed = v)),
-                _divider(c),
-                _switch(c, Icons.summarize_outlined,
-                    'Grup bildirim özeti',
-                    value: _s.notifGroupSummary,
-                    onChanged: (v) =>
-                        _s.update(() => _s.notifGroupSummary = v)),
-              ]),
+                _section('Medya ve depolama', c),
+                _card(c, [
+                  _switch(c, Icons.photo_outlined, 'Fotoğrafları otomatik yükle',
+                      value: _s.autoLoadPhotos,
+                      onChanged: (v) => _s.update(() => _s.autoLoadPhotos = v)),
+                  _divider(c),
+                  _switch(c, Icons.videocam_outlined, 'Videoları otomatik yükle',
+                      value: _s.autoLoadVideos,
+                      onChanged: (v) => _s.update(() => _s.autoLoadVideos = v)),
+                  _divider(c),
+                  _switch(c, Icons.mic_none, 'Sesli mesajları otomatik yükle',
+                      value: _s.autoLoadAudio,
+                      onChanged: (v) => _s.update(() => _s.autoLoadAudio = v)),
+                  _divider(c),
+                  _switch(c, Icons.insert_drive_file_outlined,
+                      'Dosyaları otomatik yükle',
+                      value: _s.autoLoadFiles,
+                      onChanged: (v) => _s.update(() => _s.autoLoadFiles = v)),
+                  _divider(c),
+                  _tile(c, Icons.cleaning_services_outlined, 'Önbelleği temizle',
+                      subtitle: _formatBytes(_cacheBytes), onTap: _clearCache),
+                ]),
 
-              _section('Görünüm', c),
-              _card(c, [
-                _switch(c, Icons.brightness_auto, 'Sistem temasını kullan',
-                    value: _s.useSystemTheme,
-                    onChanged: (v) =>
-                        _s.update(() => _s.useSystemTheme = v)),
-                _divider(c),
-                _tile(c, Icons.palette_outlined, 'Tema',
-                    subtitle: _s.themeMode,
-                    trailing: !_s.useSystemTheme,
-                    onTap: _s.useSystemTheme
-                        ? null
-                        : () => _selectOption(
-                              title: 'Tema',
-                              options: const [
-                                'Karanlık',
-                                'Aydınlık',
-                              ],
-                              current: _s.themeMode,
-                              onSelect: (v) =>
-                                  _s.update(() => _s.themeMode = v),
-                            )),
-                _divider(c),
-                _tile(c, Icons.wallpaper_outlined, 'Sohbet duvar kağıdı',
-                    subtitle: _s.chatWallpaper,
-                    onTap: () => _selectOption(
-                          title: 'Duvar kağıdı',
-                          options: const [
-                            'Varsayılan',
-                            'Koyu',
-                            'Desenli',
-                          ],
-                          current: _s.chatWallpaper,
-                          onSelect: (v) =>
-                              _s.update(() => _s.chatWallpaper = v),
-                        )),
-                _divider(c),
-                _tile(c, Icons.text_fields, 'Yazı boyutu',
-                    subtitle: '${(_s.fontScale * 100).round()}%',
-                    onTap: _showFontDialog),
-                _divider(c),
-                _switch(c, Icons.contrast, 'Yüksek kontrast',
-                    value: _s.highContrast,
-                    onChanged: (v) =>
-                        _s.update(() => _s.highContrast = v)),
-              ]),
+                _section('Veri', c),
+                _card(c, [
+                  _tile(c, Icons.lock_outline, 'Şifreli dışa aktar',
+                      subtitle: 'Profil, mesajlar ve ayarlar. Kasa şifresinden ayrı şifre ister.',
+                      onTap: _busy ? null : _exportEncrypted),
+                  _divider(c),
+                  _tile(c, Icons.copy_outlined, 'Ayarları dışa aktar',
+                      subtitle: 'Yalnızca tercihler, şifre içermez',
+                      onTap: _exportSettings),
+                  _divider(c),
+                  _tile(c, Icons.paste_outlined, 'Ayarları içe aktar',
+                      subtitle: 'Dışa aktarılmış ayar metnini yapıştır',
+                      onTap: _importSettings),
+                  _divider(c),
+                  _tile(c, Icons.restart_alt, 'Ayarları sıfırla',
+                      subtitle: 'Tercihleri varsayılana döndürür',
+                      titleColor: c.danger, onTap: _resetSettings),
+                ]),
 
-              _section('Veri ve depolama', c),
-              _card(c, [
-                _switch(c, Icons.wifi, 'Wi-Fi ile otomatik indir',
-                    value: _s.autoDownloadWifi,
-                    onChanged: (v) =>
-                        _s.update(() => _s.autoDownloadWifi = v)),
-                _divider(c),
-                _switch(c, Icons.network_cell, 'Mobil veriyle otomatik indir',
-                    value: _s.autoDownloadMobile,
-                    onChanged: (v) =>
-                        _s.update(() => _s.autoDownloadMobile = v)),
-                _divider(c),
-                _switch(c, Icons.photo_outlined, 'Fotoğrafları indir',
-                    value: _s.autoDownloadPhotos,
-                    onChanged: (v) =>
-                        _s.update(() => _s.autoDownloadPhotos = v)),
-                _divider(c),
-                _switch(c, Icons.videocam_outlined, 'Videoları indir',
-                    value: _s.autoDownloadVideos,
-                    onChanged: (v) =>
-                        _s.update(() => _s.autoDownloadVideos = v)),
-                _divider(c),
-                _switch(c, Icons.description_outlined, 'Belgeleri indir',
-                    value: _s.autoDownloadDocs,
-                    onChanged: (v) =>
-                        _s.update(() => _s.autoDownloadDocs = v)),
-                _divider(c),
-                _tile(c, Icons.cleaning_services_outlined,
-                    'Önbelleği temizle',
-                    subtitle: _cacheSize, onTap: _clearCache),
-              ]),
+                _section('Yardım ve destek', c),
+                _card(c, [
+                  _tile(c, Icons.email_outlined, 'Bize ulaşın',
+                      subtitle: 'writetome@gettic.dpdns.org',
+                      onTap: () => _copy('writetome@gettic.dpdns.org', 'Adres kopyalandı')),
+                  _divider(c),
+                  _tile(c, Icons.bug_report_outlined, 'Hata bildir',
+                      subtitle: 'Hata şablonunu kopyala ve e-posta ile gönder',
+                      onTap: () => _copy(
+                          'Konu: Hata bildirimi\n\nUygulama: ${AppConstants.appName} v${AppConstants.appVersion}\nKullanıcı: ${_profile?.username ?? '-'}\n\nHata açıklaması:\n',
+                          'Hata şablonu kopyalandı')),
+                  _divider(c),
+                  _tile(c, Icons.lightbulb_outline, 'Özellik iste',
+                      onTap: () => _copy(
+                          'Konu: Özellik isteği\n\nİstediğim özellik: ',
+                          'Şablon kopyalandı')),
+                  _divider(c),
+                  _tile(c, Icons.share_outlined, 'Arkadaşlarını davet et',
+                      subtitle: 'Uygulama bağlantısını kopyala',
+                      onTap: () => _copy(
+                          'Gettic - Gizlilik odaklı mesajlaşma. İndir: https://gettic.dpdns.org',
+                          'Davet bağlantısı kopyalandı')),
+                ]),
 
-              _section('Yedekleme', c),
-              _card(c, [
-                _tile(c, Icons.backup_outlined, 'Sohbetleri yedekle',
-                    subtitle: 'JSON olarak panoya kopyala',
-                    onTap: _backupChats),
-                _divider(c),
-                _tile(c, Icons.download_outlined, 'Verilerimi indir',
-                    subtitle: 'Profil ve e-posta JSON',
-                    onTap: _downloadMyData),
-              ]),
+                _section('Hakkında', c),
+                _card(c, [
+                  _tile(c, Icons.info_outline, 'Gettic hakkında',
+                      subtitle: 'v${AppConstants.appVersion}', onTap: _showAbout),
+                  _divider(c),
+                  _tile(c, Icons.article_outlined, 'Açık kaynak lisansları',
+                      onTap: _showLicenses),
+                ]),
 
-              _section('Oturumlar', c),
-              _card(c, [
-                _tile(c, Icons.devices_outlined, 'Aktif oturumlar',
-                    subtitle: 'Tüm cihazlardan çıkış',
-                    onTap: _showActiveSessions),
-              ]),
+                _section('Tehlikeli bölge', c, color: c.danger),
+                _card(c, [
+                  _tile(c, Icons.logout, 'Çıkış yap', onTap: _signOut),
+                  _divider(c),
+                  _tile(c, Icons.delete_forever_outlined, 'Hesabımı sil',
+                      subtitle: 'Bu işlem geri alınamaz',
+                      iconColor: c.danger,
+                      titleColor: c.danger,
+                      onTap: _busy ? null : _deleteAccount),
+                ]),
 
-              _section('Dil', c),
-              _card(c, [
-                _tile(c, Icons.language, 'Uygulama dili',
-                    subtitle: _s.language,
-                    onTap: () => _selectOption(
-                          title: 'Dil',
-                          options: const [
-                            'Türkçe',
-                            'English',
-                            'Deutsch',
-                            'Français',
-                            'Español',
-                            'العربية',
-                          ],
-                          current: _s.language,
-                          onSelect: (v) =>
-                              _s.update(() => _s.language = v),
-                        )),
-              ]),
-
-              _section('Gelişmiş', c),
-              _card(c, [
-                _switch(c, Icons.science_outlined, 'Deneysel özellikler',
-                    value: _s.experimentalFeatures,
-                    onChanged: (v) =>
-                        _s.update(() => _s.experimentalFeatures = v)),
-                _divider(c),
-                _switch(c, Icons.bug_report_outlined, 'Ayrıntılı log',
-                    value: _s.verboseLogging,
-                    onChanged: (v) =>
-                        _s.update(() => _s.verboseLogging = v)),
-              ]),
-
-              _section('Davet et', c),
-              _card(c, [
-                _tile(c, Icons.share_outlined, 'Arkadaşlarını davet et',
-                    onTap: _shareApp),
-              ]),
-
-              _section('Yardım ve destek', c),
-              _card(c, [
-                _tile(c, Icons.email_outlined, 'Bize ulaşın',
-                    subtitle: 'writetome@gettic.dpdns.org',
-                    onTap: _contactSupport),
-                _divider(c),
-                _tile(c, Icons.bug_report_outlined, 'Hata bildir',
-                    onTap: _reportBug),
-                _divider(c),
-                _tile(c, Icons.lightbulb_outline, 'Özellik iste',
-                    onTap: _requestFeature),
-              ]),
-
-              _section('Hakkında', c),
-              _card(c, [
-                _tile(c, Icons.info_outline, 'Gettic hakkında',
-                    subtitle: 'v${AppConstants.appVersion}',
-                    onTap: _showAbout),
-                _divider(c),
-                _tile(c, Icons.article_outlined, 'Açık kaynak lisansları',
-                    onTap: _showLicenses),
-              ]),
-
-              _section('Tehlikeli bölge', c, color: c.danger),
-              _card(c, [
-                _tile(c, Icons.logout, 'Çıkış yap', onTap: _signOut),
-                _divider(c),
-                _tile(c, Icons.delete_forever_outlined, 'Hesabımı sil',
-                    subtitle: 'Bu işlem geri alınamaz',
-                    iconColor: c.danger,
-                    titleColor: c.danger,
-                    onTap: _deleteAccount),
-              ]),
-
-              const SizedBox(height: 28),
-              _footer(c),
-            ],
-          );
-        },
+                const SizedBox(height: 28),
+                _footer(c),
+              ],
+            ),
+          ),
+          if (_busy)
+            Container(
+              color: Colors.black26,
+              child: Center(child: CircularProgressIndicator(color: c.primary)),
+            ),
+        ],
       ),
     );
   }
@@ -889,14 +1058,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 CircleAvatar(
                   radius: 30,
                   backgroundColor: c.primary,
-                  backgroundImage: hasAvatar
-                      ? CachedNetworkImageProvider(p.avatarUrl!)
-                      : null,
+                  backgroundImage:
+                      hasAvatar ? CachedNetworkImageProvider(p.avatarUrl!) : null,
                   child: !hasAvatar
                       ? Text(
-                          p.username.isNotEmpty
-                              ? p.username[0].toUpperCase()
-                              : '?',
+                          p.username.isNotEmpty ? p.username[0].toUpperCase() : '?',
                           style: const TextStyle(
                               fontSize: 24,
                               color: Colors.white,
@@ -978,14 +1144,13 @@ class _SettingsPageState extends State<SettingsPage> {
     Color? titleColor,
     bool trailing = true,
   }) {
+    final enabled = onTap != null;
     return ListTile(
       leading: Icon(icon, color: iconColor ?? c.textSecondary, size: 22),
       title: Text(
         title,
         style: TextStyle(
-          color: onTap == null && titleColor == null
-              ? c.textHint
-              : (titleColor ?? c.textPrimary),
+          color: titleColor ?? (enabled ? c.textPrimary : c.textHint),
           fontSize: 15,
           fontWeight: FontWeight.w500,
         ),
@@ -993,10 +1158,10 @@ class _SettingsPageState extends State<SettingsPage> {
       subtitle: subtitle != null
           ? Text(subtitle,
               style: TextStyle(color: c.textSecondary, fontSize: 12),
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis)
           : null,
-      trailing: (onTap != null && trailing)
+      trailing: (enabled && trailing)
           ? Icon(Icons.chevron_right, color: c.textSecondary, size: 20)
           : null,
       onTap: onTap,
@@ -1017,8 +1182,7 @@ class _SettingsPageState extends State<SettingsPage> {
           style: TextStyle(
               color: c.textPrimary, fontSize: 15, fontWeight: FontWeight.w500)),
       subtitle: subtitle != null
-          ? Text(subtitle,
-              style: TextStyle(color: c.textSecondary, fontSize: 12))
+          ? Text(subtitle, style: TextStyle(color: c.textSecondary, fontSize: 12))
           : null,
       value: value,
       activeColor: c.primary,
@@ -1026,8 +1190,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _divider(AppColors c) =>
-      Divider(color: c.border, height: 1, indent: 56);
+  Widget _divider(AppColors c) => Divider(color: c.border, height: 1, indent: 56);
 
   Widget _footer(AppColors c) {
     return Center(
@@ -1046,25 +1209,20 @@ class _SettingsPageState extends State<SettingsPage> {
                 Container(
                   width: 8,
                   height: 8,
-                  decoration:
-                      BoxDecoration(color: c.online, shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: c.online, shape: BoxShape.circle),
                 ),
                 const SizedBox(width: 8),
                 Text(
                   '${AppConstants.appName} v${AppConstants.appVersion}',
                   style: TextStyle(
-                      color: c.textPrimary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600),
+                      color: c.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            "Türkiye'de sevgiyle yapıldı",
-            style: TextStyle(color: c.textHint, fontSize: 11),
-          ),
+          Text("Türkiye'de sevgiyle yapıldı",
+              style: TextStyle(color: c.textHint, fontSize: 11)),
         ],
       ),
     );
