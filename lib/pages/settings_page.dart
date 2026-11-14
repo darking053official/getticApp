@@ -24,7 +24,10 @@ import '../core/constants.dart';
 import '../core/security.dart';
 import '../core/theme.dart';
 import '../models/profile.dart';
-import '../services/pass_sync.dart';
+import '../services/cloud_notebook.dart';
+import '../services/cloud_pass.dart';
+import '../services/cloud_vaults.dart';
+import '../services/web_crypto.dart';
 import '../services/supabase_service.dart';
 import 'profile_page.dart';
 
@@ -254,7 +257,7 @@ class _SettingsPageState extends State<SettingsPage> {
       confirm: 'Çıkış',
     );
     if (ok == true) {
-      SecureVault.instance.lock();
+      CloudVaults.lockAll();
       await _service.signOut();
     }
   }
@@ -276,7 +279,7 @@ class _SettingsPageState extends State<SettingsPage> {
             .delete()
             .eq('id', userId);
       }
-      SecureVault.instance.lock();
+      CloudVaults.lockAll();
       await _service.deleteAccount();
     } catch (e) {
       _snack('Hata: $e', isError: true);
@@ -286,15 +289,16 @@ class _SettingsPageState extends State<SettingsPage> {
   // ==========================================
   // GÜVENLİK
   // ==========================================
-  Future<void> _changeVaultPassword() async {
+  /// Ürün kasasının parolasını değiştirir (Pass ya da Notebook).
+  Future<void> _changeProductPassword(CloudVault vault, String label) async {
     final old = await _askPassword(
-      title: 'Mevcut kasa şifresi',
+      title: '$label: mevcut şifre',
       hint: 'Mevcut şifren',
     );
     if (old == null) return;
 
     final neu = await _askPassword(
-      title: 'Yeni kasa şifresi',
+      title: '$label: yeni şifre',
       hint: 'En az 8 karakter',
       withConfirm: true,
     );
@@ -302,12 +306,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
     setState(() => _busy = true);
     try {
-      await SecureVault.instance.changeSecret(old, neu);
-      // Senkron açıksa sunucudaki kopya yeni şifreyle yeniden şifrelenir
-      if (await PassSync.instance.isEnabled()) {
-        await PassSync.instance.rekey(neu);
-      }
-      _snack('Kasa şifresi değiştirildi');
+      await vault.changePassword(old, neu);
+      _snack('$label şifresi değiştirildi');
     } on SecurityException catch (e) {
       _snack(e.message, isError: true);
     } catch (e) {
@@ -318,62 +318,8 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _lockVaultNow() {
-    SecureVault.instance.lock();
+    CloudVaults.lockAll();
     _snack('Kasa kilitlendi');
-  }
-
-  Future<bool?> _syncEnabledState() async {
-    if (!SecureVault.instance.isUnlocked) return null;
-    return PassSync.instance.isEnabled();
-  }
-
-  Future<void> _syncMenu(bool enabled) async {
-    if (!enabled) {
-      _snack('Senkronu Parola Kasası ekranından açabilirsin');
-      return;
-    }
-    final c = context.appColors;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: c.surface,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(Icons.sync, color: c.primary),
-              title: Text('Şimdi senkronize et',
-                  style: TextStyle(color: c.textPrimary)),
-              onTap: () async {
-                Navigator.pop(ctx);
-                try {
-                  await PassSync.instance.sync();
-                  _snack('Senkronize edildi');
-                } on SecurityException catch (e) {
-                  _snack(e.message, isError: true);
-                } catch (_) {
-                  _snack('Senkron yapılamadı. Bağlantını kontrol et.',
-                      isError: true);
-                }
-                if (mounted) setState(() {});
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.sync_disabled, color: c.danger),
-              title: Text('Senkronu kapat', style: TextStyle(color: c.danger)),
-              subtitle: Text('Sunucudaki kopya silinmez',
-                  style: TextStyle(color: c.textSecondary, fontSize: 12)),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await PassSync.instance.disable();
-                _snack('Senkron kapatıldı');
-                if (mounted) setState(() {});
-              },
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   // ==========================================
@@ -857,9 +803,19 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 _section('Güvenlik', c),
                 _card(c, [
-                  _tile(c, Icons.key_outlined, 'Kasa şifresini değiştir',
-                      subtitle: 'Notebook ve Parola Kasası için ortak şifre',
-                      onTap: _busy ? null : _changeVaultPassword),
+                  _tile(c, Icons.key_outlined, 'Parola Kasası şifresi',
+                      subtitle: 'Parola kasasını açan şifre',
+                      onTap: _busy
+                          ? null
+                          : () => _changeProductPassword(
+                              PassCloud.instance, 'Parola Kasası')),
+                  _divider(c),
+                  _tile(c, Icons.menu_book_outlined, 'Defter şifresi',
+                      subtitle: 'Notebook\'u açan şifre',
+                      onTap: _busy
+                          ? null
+                          : () => _changeProductPassword(
+                              NotebookCloud.instance, 'Defter')),
                   _divider(c),
                   _tile(c, Icons.timer_outlined, 'Otomatik kilit',
                       subtitle: 'Uygulama bu süre arka planda kalınca kasa kilitlenir: '
@@ -875,20 +831,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   _tile(c, Icons.lock_outline, 'Kasayı şimdi kilitle',
                       onTap: _lockVaultNow),
                   _divider(c),
-                  FutureBuilder<bool?>(
-                    future: _syncEnabledState(),
-                    builder: (context, snap) {
-                      final state = snap.data;
-                      final subtitle = state == null
-                          ? 'Görmek için kasayı aç'
-                          : (state ? 'Açık: parolalar eşitleniyor' : 'Kapalı');
-                      return _tile(c, Icons.sync, 'Parola senkronu',
-                          subtitle: subtitle,
-                          onTap: state == null
-                              ? null
-                              : () => _syncMenu(state));
-                    },
-                  ),
                 ]),
 
                 _section('Bildirimler', c),
