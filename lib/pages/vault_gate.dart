@@ -2,10 +2,9 @@
 // lib/pages/vault_gate.dart
 // (.txt olarak verildi. Projeye eklerken adını vault_gate.dart yapın.)
 //
-// Kasa durumu her seferinde kontrol edilir:
-//  - Kasa hiç kurulmadıysa: "Kasa şifresi oluştur" ekranı.
-//  - Kuruluysa: "Kilidi aç" ekranı.
-// Durum değişirse (ör. başka bir bölümde kasa kurulduysa) ekran otomatik düzelir.
+// Bulut kasa kapısı. Her ürünün kendi şifresi var (Pass ve Notebook ayrı).
+//  - Doğrulama kaydı yoksa: "Kasa şifresi oluştur" (en az 8 karakter).
+//  - Varsa: "Kilidi aç" (en az 6 karakter).
 // ============================================================
 
 import 'package:flutter/material.dart';
@@ -13,19 +12,20 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/security.dart';
 import '../core/theme.dart';
+import '../services/cloud_vaults.dart';
+import '../services/web_crypto.dart';
 
 class VaultGate extends StatefulWidget {
-  /// Kilit ekranındaki başlık (kasa kuruluyken)
+  /// Bu ürünün bulut kasası (PassCloud.instance veya NotebookCloud.instance)
+  final CloudVault vault;
   final String lockedTitle;
-  /// Kilit ekranındaki açıklama (kasa kuruluyken)
   final String lockedHint;
-  /// Logo (assets/ altında)
   final String logoAsset;
-  /// Kasa açılınca gösterilecek içerik
   final WidgetBuilder builder;
 
   const VaultGate({
     super.key,
+    required this.vault,
     required this.lockedTitle,
     required this.lockedHint,
     required this.logoAsset,
@@ -37,63 +37,92 @@ class VaultGate extends StatefulWidget {
 }
 
 class _VaultGateState extends State<VaultGate> {
-  final SecureVault _vault = SecureVault.instance;
+  /// null: kontrol ediliyor, true: doğrulama var, false: kurulmamış
+  bool? _hasVerifier;
+  String? _loadError;
 
-  /// null: henüz kontrol edilmedi. true: kasa kurulu. false: kurulmamış.
-  bool? _isSetUp;
+  CloudVault get _vault => widget.vault;
 
   @override
   void initState() {
     super.initState();
-    _vault.addListener(_onVaultChanged);
-    _refreshSetupState();
+    _vault.addListener(_onChanged);
+    _check();
+  }
+
+  @override
+  void didUpdateWidget(covariant VaultGate oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.vault != widget.vault) {
+      oldWidget.vault.removeListener(_onChanged);
+      widget.vault.addListener(_onChanged);
+      _check();
+    }
   }
 
   @override
   void dispose() {
-    _vault.removeListener(_onVaultChanged);
-    // Sayfadan çıkınca kasayı kilitle (otomatik kilit süresi ayarlardan yönetilir)
+    _vault.removeListener(_onChanged);
+    // Sayfadan çıkınca bu kasayı kilitle
     _vault.lock();
     super.dispose();
   }
 
-  /// Kasanın kurulu olup olmadığını depodan yeniden okur.
-  Future<void> _refreshSetupState() async {
-    final setUp = await _vault.isSetUp;
-    if (mounted) setState(() => _isSetUp = setUp);
+  Future<void> _check() async {
+    if (_loadError != null) setState(() => _loadError = null);
+    try {
+      final has = await _vault.hasVerifier();
+      if (mounted) setState(() => _hasVerifier = has);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loadError = 'Bağlantı kurulamadı. İnternetini kontrol et.');
+      }
+    }
   }
 
-  void _onVaultChanged() {
-    if (!mounted) return;
-    if (_vault.isUnlocked) {
-      setState(() {});
-    } else {
-      // Kilitlendiğinde kurulum durumunu tazele
-      _refreshSetupState();
-    }
+  void _onChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final setUp = _isSetUp;
+    if (_vault.isUnlocked) return widget.builder(context);
 
-    if (setUp == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+    if (_loadError != null) {
+      final c = context.appColors;
+      return Scaffold(
+        backgroundColor: c.background,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_loadError!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: c.textSecondary)),
+                const SizedBox(height: 16),
+                ElevatedButton(onPressed: _check, child: const Text('Tekrar dene')),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
-    if (_vault.isUnlocked) {
-      return widget.builder(context);
+    final has = _hasVerifier;
+    if (has == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return _LockView(
-      isSetUp: setUp,
+      vault: _vault,
+      hasVerifier: has,
       title: widget.lockedTitle,
       hint: widget.lockedHint,
       logoAsset: widget.logoAsset,
-      onSetupStateChanged: (value) {
-        if (mounted) setState(() => _isSetUp = value);
+      onVerifierChanged: (v) {
+        if (mounted) setState(() => _hasVerifier = v);
       },
     );
   }
@@ -103,18 +132,20 @@ class _VaultGateState extends State<VaultGate> {
 // KİLİT GÖRÜNÜMÜ
 // ============================================================
 class _LockView extends StatefulWidget {
-  final bool isSetUp;
+  final CloudVault vault;
+  final bool hasVerifier;
   final String title;
   final String hint;
   final String logoAsset;
-  final ValueChanged<bool> onSetupStateChanged;
+  final ValueChanged<bool> onVerifierChanged;
 
   const _LockView({
-    required this.isSetUp,
+    required this.vault,
+    required this.hasVerifier,
     required this.title,
     required this.hint,
     required this.logoAsset,
-    required this.onSetupStateChanged,
+    required this.onVerifierChanged,
   });
 
   @override
@@ -124,11 +155,9 @@ class _LockView extends StatefulWidget {
 class _LockViewState extends State<_LockView> {
   final _secret = TextEditingController();
   final _confirm = TextEditingController();
-  final SecureVault _vault = SecureVault.instance;
   bool _obscure = true;
   bool _busy = false;
   String? _error;
-  PasswordReport _report = PasswordReport.evaluate('');
 
   @override
   void dispose() {
@@ -144,16 +173,10 @@ class _LockViewState extends State<_LockView> {
       return;
     }
 
-    final setup = !widget.isSetUp;
-    if (setup) {
-      if (!_report.isAcceptable) {
-        setState(() => _error = 'Daha güçlü bir kasa şifresi seç');
-        return;
-      }
-      if (_confirm.text != text) {
-        setState(() => _error = 'Şifreler eşleşmiyor');
-        return;
-      }
+    final setup = !widget.hasVerifier;
+    if (setup && _confirm.text != text) {
+      setState(() => _error = 'Şifreler eşleşmiyor');
+      return;
     }
 
     setState(() {
@@ -163,40 +186,35 @@ class _LockViewState extends State<_LockView> {
 
     try {
       if (setup) {
-        await _vault.setUp(text);
-        // Başarılı: kasa açık, VaultGate içeriği gösterir
+        await widget.vault.setup(text);
       } else {
-        await _vault.unlock(text);
+        await widget.vault.unlock(text);
       }
+      // Başarılı: CloudVault bildirir, VaultGate içeriği gösterir
     } on SecurityException catch (e) {
       if (!mounted) return;
       final msg = e.message;
-
-      // Durum bayatsa (kasa zaten kurulmuş ya da hiç kurulmamış) düzelt
-      if (msg.contains('zaten kurulmuş')) {
-        widget.onSetupStateChanged(true);
-        setState(() => _error = 'Kasa zaten kurulu. Şifreni girerek aç.');
-      } else if (msg.contains('kurulmamış')) {
-        widget.onSetupStateChanged(false);
-        setState(() => _error = 'Kasa henüz kurulmamış. Şifre oluştur.');
-      } else {
-        setState(() => _error = msg);
+      if (msg.contains('zaten') || msg.contains('oluşturulmamış')) {
+        // Durum değişmiş: ekranı doğru moda getir
+        widget.onVerifierChanged(!msg.contains('oluşturulmamış'));
       }
-    } catch (_) {
-      if (mounted) setState(() => _error = 'Beklenmeyen bir hata oluştu');
+      setState(() => _error = msg);
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Bağlantı hatası. Tekrar dene.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _signOut() async {
+    CloudVaults.lockAll();
     await Supabase.instance.client.auth.signOut();
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.appColors;
-    final setup = !widget.isSetUp;
+    final setup = !widget.hasVerifier;
 
     return Scaffold(
       backgroundColor: c.background,
@@ -228,7 +246,7 @@ class _LockViewState extends State<_LockView> {
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    setup ? 'Kasa şifreni oluştur' : widget.title,
+                    setup ? 'Şifre oluştur' : widget.title,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: c.textPrimary,
@@ -239,7 +257,7 @@ class _LockViewState extends State<_LockView> {
                   const SizedBox(height: 8),
                   Text(
                     setup
-                        ? 'Bu şifre Notebook ve Parola Kasası için ortaktır. Unutulursa veriler kurtarılamaz.'
+                        ? 'Bu şifre yalnızca bu bölüm için. En az 8 karakter. Unutulursa veriler kurtarılamaz.'
                         : widget.hint,
                     textAlign: TextAlign.center,
                     style: TextStyle(color: c.textSecondary, fontSize: 14),
@@ -251,13 +269,9 @@ class _LockViewState extends State<_LockView> {
                     autocorrect: false,
                     enableSuggestions: false,
                     enableIMEPersonalizedLearning: false,
-                    onChanged: setup
-                        ? (v) => setState(
-                            () => _report = PasswordReport.evaluate(v))
-                        : null,
                     onSubmitted: (_) => _submit(),
                     decoration: InputDecoration(
-                      hintText: setup ? 'Kasa şifresi' : 'Kasa şifresi',
+                      hintText: 'Şifre',
                       prefixIcon: const Icon(Icons.key_outlined),
                       suffixIcon: IconButton(
                         icon: Icon(_obscure
@@ -280,8 +294,6 @@ class _LockViewState extends State<_LockView> {
                       ),
                       onSubmitted: (_) => _submit(),
                     ),
-                    const SizedBox(height: 12),
-                    _StrengthBar(report: _report),
                   ],
                   if (_error != null) ...[
                     const SizedBox(height: 12),
@@ -302,7 +314,7 @@ class _LockViewState extends State<_LockView> {
                               height: 22,
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: Colors.white))
-                          : Text(setup ? 'Kasayı oluştur' : 'Kilidi aç'),
+                          : Text(setup ? 'Oluştur ve aç' : 'Kilidi aç'),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -319,43 +331,6 @@ class _LockViewState extends State<_LockView> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _StrengthBar extends StatelessWidget {
-  final PasswordReport report;
-  const _StrengthBar({required this.report});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.appColors;
-    final color = switch (report.strength) {
-      PasswordStrength.veryWeak || PasswordStrength.weak => c.danger,
-      PasswordStrength.fair => Colors.amber.shade700,
-      PasswordStrength.strong || PasswordStrength.veryStrong => c.online,
-    };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: List.generate(5, (i) {
-            return Expanded(
-              child: Container(
-                height: 4,
-                margin: EdgeInsets.only(right: i < 4 ? 4 : 0),
-                decoration: BoxDecoration(
-                  color: i <= report.strength.index ? color : c.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            );
-          }),
-        ),
-        const SizedBox(height: 6),
-        Text('Şifre gücü: ${report.label}',
-            style: TextStyle(color: color, fontSize: 12)),
-      ],
     );
   }
 }
