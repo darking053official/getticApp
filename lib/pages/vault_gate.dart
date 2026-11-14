@@ -1,9 +1,11 @@
 // ============================================================
 // lib/pages/vault_gate.dart
+// (.txt olarak verildi. Projeye eklerken adını vault_gate.dart yapın.)
 //
-// Notebook ve Parola Kasası için ortak kilit ekranı.
-// Her iki bölüm de tek bir kasa parolasını (SecureVault) kullanır.
-// Kasa açılmadan içerik gösterilmez.
+// Kasa durumu her seferinde kontrol edilir:
+//  - Kasa hiç kurulmadıysa: "Kasa şifresi oluştur" ekranı.
+//  - Kuruluysa: "Kilidi aç" ekranı.
+// Durum değişirse (ör. başka bir bölümde kasa kurulduysa) ekran otomatik düzelir.
 // ============================================================
 
 import 'package:flutter/material.dart';
@@ -13,9 +15,9 @@ import '../core/security.dart';
 import '../core/theme.dart';
 
 class VaultGate extends StatefulWidget {
-  /// Kilit ekranındaki başlık (ör. "Kasa Kilitli", "Defter kilitli")
+  /// Kilit ekranındaki başlık (kasa kuruluyken)
   final String lockedTitle;
-  /// Kilit ekranındaki açıklama
+  /// Kilit ekranındaki açıklama (kasa kuruluyken)
   final String lockedHint;
   /// Logo (assets/ altında)
   final String logoAsset;
@@ -36,6 +38,8 @@ class VaultGate extends StatefulWidget {
 
 class _VaultGateState extends State<VaultGate> {
   final SecureVault _vault = SecureVault.instance;
+
+  /// null: henüz kontrol edilmedi. true: kasa kurulu. false: kurulmamış.
   bool? _isSetUp;
 
   @override
@@ -43,7 +47,7 @@ class _VaultGateState extends State<VaultGate> {
     super.initState();
     _vault.addListener(_onVaultChanged);
     _vault.enableAutoLock(after: const Duration(minutes: 2));
-    _check();
+    _refreshSetupState();
   }
 
   @override
@@ -55,31 +59,44 @@ class _VaultGateState extends State<VaultGate> {
     super.dispose();
   }
 
-  Future<void> _check() async {
+  /// Kasanın kurulu olup olmadığını depodan yeniden okur.
+  Future<void> _refreshSetupState() async {
     final setUp = await _vault.isSetUp;
     if (mounted) setState(() => _isSetUp = setUp);
   }
 
   void _onVaultChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_vault.isUnlocked) {
+      setState(() {});
+    } else {
+      // Kilitlendiğinde kurulum durumunu tazele
+      _refreshSetupState();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isSetUp == null) {
+    final setUp = _isSetUp;
+
+    if (setUp == null) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
     }
+
     if (_vault.isUnlocked) {
       return widget.builder(context);
     }
+
     return _LockView(
-      isSetUp: _isSetUp!,
+      isSetUp: setUp,
       title: widget.lockedTitle,
       hint: widget.lockedHint,
       logoAsset: widget.logoAsset,
-      onAfterSetUp: () => setState(() => _isSetUp = true),
+      onSetupStateChanged: (value) {
+        if (mounted) setState(() => _isSetUp = value);
+      },
     );
   }
 }
@@ -92,14 +109,14 @@ class _LockView extends StatefulWidget {
   final String title;
   final String hint;
   final String logoAsset;
-  final VoidCallback onAfterSetUp;
+  final ValueChanged<bool> onSetupStateChanged;
 
   const _LockView({
     required this.isSetUp,
     required this.title,
     required this.hint,
     required this.logoAsset,
-    required this.onAfterSetUp,
+    required this.onSetupStateChanged,
   });
 
   @override
@@ -128,7 +145,9 @@ class _LockViewState extends State<_LockView> {
       setState(() => _error = 'Şifre gerekli');
       return;
     }
-    if (!widget.isSetUp) {
+
+    final setup = !widget.isSetUp;
+    if (setup) {
       if (!_report.isAcceptable) {
         setState(() => _error = 'Daha güçlü bir kasa şifresi seç');
         return;
@@ -143,16 +162,28 @@ class _LockViewState extends State<_LockView> {
       _busy = true;
       _error = null;
     });
+
     try {
-      if (widget.isSetUp) {
-        await _vault.unlock(text);
-      } else {
+      if (setup) {
         await _vault.setUp(text);
-        widget.onAfterSetUp();
+        // Başarılı: kasa açık, VaultGate içeriği gösterir
+      } else {
+        await _vault.unlock(text);
       }
-      // Başarılıysa VaultGate kilidi kaldırır ve içeriği gösterir
     } on SecurityException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      if (!mounted) return;
+      final msg = e.message;
+
+      // Durum bayatsa (kasa zaten kurulmuş ya da hiç kurulmamış) düzelt
+      if (msg.contains('zaten kurulmuş')) {
+        widget.onSetupStateChanged(true);
+        setState(() => _error = 'Kasa zaten kurulu. Şifreni girerek aç.');
+      } else if (msg.contains('kurulmamış')) {
+        widget.onSetupStateChanged(false);
+        setState(() => _error = 'Kasa henüz kurulmamış. Şifre oluştur.');
+      } else {
+        setState(() => _error = msg);
+      }
     } catch (_) {
       if (mounted) setState(() => _error = 'Beklenmeyen bir hata oluştu');
     } finally {
@@ -223,12 +254,12 @@ class _LockViewState extends State<_LockView> {
                     enableSuggestions: false,
                     enableIMEPersonalizedLearning: false,
                     onChanged: setup
-                        ? (v) =>
-                            setState(() => _report = PasswordReport.evaluate(v))
+                        ? (v) => setState(
+                            () => _report = PasswordReport.evaluate(v))
                         : null,
-                    onSubmitted: (_) => setup ? null : _submit(),
+                    onSubmitted: (_) => _submit(),
                     decoration: InputDecoration(
-                      hintText: setup ? 'Kasa şifresi' : 'Defter şifresi',
+                      hintText: setup ? 'Kasa şifresi' : 'Kasa şifresi',
                       prefixIcon: const Icon(Icons.key_outlined),
                       suffixIcon: IconButton(
                         icon: Icon(_obscure
