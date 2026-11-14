@@ -23,6 +23,7 @@ import 'core/security.dart';
 import 'core/theme.dart';
 import 'pages/apps.dart';
 import 'pages/auth_page.dart';
+import 'services/cloud_vaults.dart';
 
 final authStateProvider = StreamProvider<AuthState>((ref) {
   return Supabase.instance.client.auth.onAuthStateChange;
@@ -150,7 +151,7 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
 
     if (minutes <= 0 || pausedAt == null) return;
     if (DateTime.now().difference(pausedAt) >= Duration(minutes: minutes)) {
-      SecureVault.instance.lock();
+      CloudVaults.lockAll();
     }
   }
 }
@@ -183,7 +184,7 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
       } else if (event == AuthChangeEvent.signedOut) {
         OneSignal.logout();
         AppState().reset();
-        SecureVault.instance.lock();
+        CloudVaults.lockAll();
       }
     });
   }
