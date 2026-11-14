@@ -1,22 +1,30 @@
 // ============================================================
 // lib/pages/pass_vault_page.dart
 //
-// GetticPass - uygulama içi parola kasası.
-// Kayıtlar, security.dart içindeki SecureVault ile açılan kasada
-// AES-256-GCM ile şifrelenmiş olarak cihazda tutulur.
+// Gettic Pass: parola kasası (webdeki düzenle uyumlu).
+//  - Kayıtlar SecureVault ile AES-256-GCM şifrelenerek cihazda tutulur.
+//  - Favoriler, zayıf parola uyarısı, arama, filtre ve sıralama.
+//  - 2FA (TOTP) kodu: kayda gizli anahtar eklenirse 30 sn'de bir yenilenir.
+//  - Senkron: pass_sync.dart (uçtan uca şifreli, eklentiyle ortak).
 //
-// Gerekenler: lib/core/security.dart, lib/core/theme.dart (AppColors)
-// Ek paket gerekmez.
+// Gerekenler: vault_gate.dart, pass_sync.dart, security.dart, theme.dart
+// Ek paket: crypto (pubspec.yaml'a açıkça ekleyin: crypto: ^3.0.3)
 // ============================================================
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show Random;
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/material.dart';
 
 import '../core/security.dart';
 import '../core/theme.dart';
 import '../services/pass_sync.dart';
+import 'vault_gate.dart';
+
+const String _kPassLogo = 'assets/getticpass_logo.png';
 
 // ============================================================
 // VERİ MODELİ
@@ -28,6 +36,9 @@ class PassEntry {
   final String password;
   final String url;
   final String notes;
+  /// Gizli 2FA (TOTP) anahtarı, base32. Boşsa 2FA kodu gösterilmez.
+  final String totpSecret;
+  final bool favorite;
   /// Son değişiklik zamanı (ms). Senkronda çakışmayı çözer.
   final int updatedAt;
   /// Silinmiş kayıt (tombstone). Silmeler senkronla yayılsın diye tutulur.
@@ -40,9 +51,17 @@ class PassEntry {
     required this.password,
     required this.url,
     required this.notes,
+    this.totpSecret = '',
+    this.favorite = false,
     this.updatedAt = 0,
     this.deleted = false,
   });
+
+  static String newId() {
+    final r = Random.secure();
+    final t = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+    return '$t-${r.nextInt(1 << 30).toRadixString(36)}';
+  }
 
   static PassEntry tombstone(PassEntry e) => PassEntry(
         id: e.id,
@@ -55,12 +74,6 @@ class PassEntry {
         deleted: true,
       );
 
-  static String newId() {
-    final r = Random.secure();
-    final t = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-    return '$t-${r.nextInt(1 << 30).toRadixString(36)}';
-  }
-
   factory PassEntry.fromJson(Map<String, dynamic> j) => PassEntry(
         id: (j['id'] ?? '') as String,
         title: (j['title'] ?? '') as String,
@@ -68,6 +81,8 @@ class PassEntry {
         password: (j['password'] ?? '') as String,
         url: (j['url'] ?? '') as String,
         notes: (j['notes'] ?? '') as String,
+        totpSecret: (j['totpSecret'] ?? '') as String,
+        favorite: (j['favorite'] ?? false) as bool,
         updatedAt: (j['updatedAt'] ?? 0) as int,
         deleted: (j['deleted'] ?? false) as bool,
       );
@@ -79,13 +94,15 @@ class PassEntry {
         'password': password,
         'url': url,
         'notes': notes,
+        'totpSecret': totpSecret,
+        'favorite': favorite,
         'updatedAt': updatedAt,
         'deleted': deleted,
       };
 }
 
 // ============================================================
-// KALICI DEPO (tek şifreli blob: SecureVault açıkken yazılır)
+// KALICI DEPO (şifreli, SecureVault açıkken)
 // ============================================================
 class PassRepository {
   PassRepository._();
@@ -112,7 +129,7 @@ class PassRepository {
 class PassGenerator {
   PassGenerator._();
 
-  // Karışıklık yaratan karakterler (0/O, 1/l/I) çıkarıldı
+  // Karıştırılabilen karakterler (0/O, 1/l/I) çıkarıldı
   static const String _lower = 'abcdefghijkmnopqrstuvwxyz';
   static const String _upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   static const String _digits = '23456789';
@@ -122,11 +139,7 @@ class PassGenerator {
     final pools = <String>[_lower, _upper, _digits, if (symbols) _symbols];
     final all = pools.join();
     final r = Random.secure();
-
-    // Her kümeden en az bir karakter (kurallara uyum)
-    final chars = <String>[
-      for (final p in pools) p[r.nextInt(p.length)],
-    ];
+    final chars = <String>[for (final p in pools) p[r.nextInt(p.length)]];
     while (chars.length < length) {
       chars.add(all[r.nextInt(all.length)]);
     }
@@ -136,54 +149,107 @@ class PassGenerator {
 }
 
 // ============================================================
-// SAYFA
+// TOTP (RFC 6238): 30 sn, 6 hane, HMAC-SHA1
+// Doğrulandı: RFC test vektörleri (T=59 -> 287082).
 // ============================================================
-class PassVaultPage extends StatefulWidget {
+class Totp {
+  Totp._();
+
+  static const String _alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+  /// Base32 çözer. Geçersiz karakter varsa [FormatException] fırlatır.
+  static Uint8List base32Decode(String input) {
+    final s = input.toUpperCase().replaceAll(RegExp(r'[\s=-]'), '');
+    var bits = 0;
+    var value = 0;
+    final out = <int>[];
+    for (final ch in s.split('')) {
+      final idx = _alphabet.indexOf(ch);
+      if (idx < 0) throw const FormatException('Geçersiz 2FA anahtarı');
+      value = ((value << 5) | idx) & 0xFFFF;
+      bits += 5;
+      if (bits >= 8) {
+        out.add((value >> (bits - 8)) & 0xFF);
+        bits -= 8;
+      }
+    }
+    if (out.isEmpty) throw const FormatException('Geçersiz 2FA anahtarı');
+    return Uint8List.fromList(out);
+  }
+
+  /// Geçerli bir base32 anahtar mı?
+  static bool isValidSecret(String s) {
+    try {
+      base32Decode(s);
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  static String code(String secret, {int? nowMs}) {
+    final key = base32Decode(secret);
+    final ms = nowMs ?? DateTime.now().millisecondsSinceEpoch;
+    final counter = (ms ~/ 1000) ~/ 30;
+    final msg = ByteData(8)..setUint64(0, counter);
+    final h = crypto.Hmac(crypto.sha1, key)
+        .convert(msg.buffer.asUint8List())
+        .bytes;
+    final off = h[h.length - 1] & 0x0F;
+    final bin = ((h[off] & 0x7F) << 24) |
+        ((h[off + 1] & 0xFF) << 16) |
+        ((h[off + 2] & 0xFF) << 8) |
+        (h[off + 3] & 0xFF);
+    return (bin % 1000000).toString().padLeft(6, '0');
+  }
+
+  /// Kodun bitmesine kalan saniye (1..30)
+  static int remaining({int? nowMs}) {
+    final ms = nowMs ?? DateTime.now().millisecondsSinceEpoch;
+    return 30 - ((ms ~/ 1000) % 30);
+  }
+}
+
+// ============================================================
+// SAYFA (kasa kapısı + içerik)
+// ============================================================
+class PassVaultPage extends StatelessWidget {
   const PassVaultPage({super.key});
 
   @override
-  State<PassVaultPage> createState() => _PassVaultPageState();
+  Widget build(BuildContext context) {
+    return VaultGate(
+      lockedTitle: 'Kasa Kilitli',
+      lockedHint: 'Devam etmek için kasa ana şifreni gir',
+      logoAsset: _kPassLogo,
+      builder: (_) => const _PassBody(),
+    );
+  }
 }
 
-class _PassVaultPageState extends State<PassVaultPage> {
-  final SecureVault _vault = SecureVault.instance;
+class _PassBody extends StatefulWidget {
+  const _PassBody();
 
-  bool? _isSetUp; // null: henüz kontrol edilmedi
+  @override
+  State<_PassBody> createState() => _PassBodyState();
+}
+
+enum _Filter { all, favorites, weak }
+
+class _PassBodyState extends State<_PassBody> {
   List<PassEntry> _items = [];
   String _query = '';
+  _Filter _filter = _Filter.all;
+  bool _favoritesFirst = true;
   bool _syncOn = false;
 
   @override
   void initState() {
     super.initState();
-    _vault.addListener(_onVaultChanged);
-    _vault.enableAutoLock(after: const Duration(minutes: 2));
-    _init();
+    _loadItems();
   }
 
-  @override
-  void dispose() {
-    _vault.removeListener(_onVaultChanged);
-    _vault.disableAutoLock();
-    // Sayfadan çıkınca kasayı kilitle: parolalar bellekte kalmasın
-    _vault.lock();
-    super.dispose();
-  }
-
-  Future<void> _init() async {
-    final setUp = await _vault.isSetUp;
-    if (!mounted) return;
-    setState(() => _isSetUp = setUp);
-    if (_vault.isUnlocked) await _loadItems();
-  }
-
-  void _onVaultChanged() {
-    if (!mounted) return;
-    if (!_vault.isUnlocked) {
-      setState(() => _items = []);
-    }
-  }
-
+  // ---------- Veri ----------
   Future<void> _loadItems() async {
     try {
       final items = await PassRepository.load();
@@ -193,22 +259,12 @@ class _PassVaultPageState extends State<PassVaultPage> {
         _items = items;
         _syncOn = on;
       });
-      if (on) PassSync.instance.scheduleSync(delay: const Duration(milliseconds: 300));
+      if (on) {
+        PassSync.instance.scheduleSync(delay: const Duration(milliseconds: 300));
+      }
     } on SecurityException catch (e) {
       _snack(e.message, isError: true);
     }
-  }
-
-  /// Kasa kurulu değilse oluşturur, kuruluysa açar.
-  Future<void> _unlockOrSetup(String secret, bool isSetUp) async {
-    if (isSetUp) {
-      await _vault.unlock(secret);
-    } else {
-      await _vault.setUp(secret);
-      _isSetUp = true;
-    }
-    await _loadItems();
-    if (mounted) setState(() {});
   }
 
   Future<void> _persist() async {
@@ -219,6 +275,45 @@ class _PassVaultPageState extends State<PassVaultPage> {
     } on SecurityException catch (e) {
       _snack(e.message, isError: true);
     }
+  }
+
+  bool _isWeak(PassEntry e) {
+    if (e.password.isEmpty) return false;
+    final r = PasswordReport.evaluate(
+      e.password,
+      userInputs: [e.title, e.username],
+    );
+    return r.strength.index <= PasswordStrength.weak.index;
+  }
+
+  List<PassEntry> get _live => _items.where((e) => !e.deleted).toList();
+
+  List<PassEntry> get _visible {
+    final q = _query.trim().toLowerCase();
+    final list = _live.where((e) {
+      switch (_filter) {
+        case _Filter.favorites:
+          if (!e.favorite) return false;
+          break;
+        case _Filter.weak:
+          if (!_isWeak(e)) return false;
+          break;
+        case _Filter.all:
+          break;
+      }
+      if (q.isEmpty) return true;
+      return e.title.toLowerCase().contains(q) ||
+          e.username.toLowerCase().contains(q) ||
+          e.url.toLowerCase().contains(q);
+    }).toList();
+
+    list.sort((a, b) {
+      if (_favoritesFirst && a.favorite != b.favorite) {
+        return a.favorite ? -1 : 1;
+      }
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    });
+    return list;
   }
 
   // ---------- Eylemler ----------
@@ -238,9 +333,26 @@ class _PassVaultPageState extends State<PassVaultPage> {
     await _persist();
   }
 
-  Future<void> _copy(PassEntry e) async {
-    await SecureClipboard.copy(e.password);
-    _snack('Parola kopyalandı. 30 saniye sonra panodan silinecek.');
+  Future<void> _toggleFavorite(PassEntry e) async {
+    final idx = _items.indexWhere((x) => x.id == e.id);
+    if (idx == -1) return;
+    _items[idx] = PassEntry(
+      id: e.id,
+      title: e.title,
+      username: e.username,
+      password: e.password,
+      url: e.url,
+      notes: e.notes,
+      totpSecret: e.totpSecret,
+      favorite: !e.favorite,
+      updatedAt: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _persist();
+  }
+
+  Future<void> _copy(String value, String what) async {
+    await SecureClipboard.copy(value);
+    _snack('$what kopyalandı. 30 saniye sonra panodan silinecek.');
   }
 
   Future<void> _confirmDelete(PassEntry e) async {
@@ -281,6 +393,35 @@ class _PassVaultPageState extends State<PassVaultPage> {
     );
   }
 
+  Future<void> _onSyncMenu(String v) async {
+    switch (v) {
+      case 'enable':
+        await showPassSyncSetup(context);
+        await _loadItems();
+        break;
+      case 'now':
+        try {
+          await PassSync.instance.sync();
+          _snack('Senkronize edildi');
+          await _loadItems();
+        } on SecurityException catch (e) {
+          _snack(e.message, isError: true);
+        } catch (_) {
+          _snack('Senkron yapılamadı. İnternet bağlantınızı kontrol edin.',
+              isError: true);
+        }
+        break;
+      case 'disable':
+        await PassSync.instance.disable();
+        if (mounted) setState(() => _syncOn = false);
+        _snack('Senkron kapatıldı. Sunucudaki kopya silinmedi.');
+        break;
+      case 'lock':
+        SecureVault.instance.lock();
+        break;
+    }
+  }
+
   void _snack(String msg, {bool isError = false}) {
     if (!mounted) return;
     final c = context.appColors;
@@ -293,301 +434,475 @@ class _PassVaultPageState extends State<PassVaultPage> {
       ));
   }
 
-  Future<void> _onSyncMenu(String v) async {
-    switch (v) {
-      case 'enable':
-        await showPassSyncSetup(context);
-        await _loadItems();
-        break;
-      case 'now':
-        await PassSync.instance.sync().then((_) async {
-          _snack('Senkronize edildi');
-          await _loadItems();
-        }).catchError((Object e) {
-          _snack(
-              e is SecurityException
-                  ? e.message
-                  : 'Senkron yapılamadı. İnternet bağlantınızı kontrol edin.',
-              isError: true);
-        });
-        break;
-      case 'disable':
-        await PassSync.instance.disable();
-        if (mounted) setState(() => _syncOn = false);
-        _snack('Senkron kapatıldı. Sunucudaki kopya silinmedi.');
-        break;
-    }
-  }
-
   // ---------- Görünüm ----------
   @override
   Widget build(BuildContext context) {
-    if (_isSetUp == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (!_vault.isUnlocked) {
-      return _LockScreen(isSetUp: _isSetUp!, onSubmit: _unlockOrSetup);
-    }
-    return _buildList(context);
-  }
-
-  Widget _buildList(BuildContext context) {
     final c = context.appColors;
-    final q = _query.trim().toLowerCase();
-    final shown = _items.where((e) {
-      if (e.deleted) return false;
-      if (q.isEmpty) return true;
-      return e.title.toLowerCase().contains(q) ||
-          e.username.toLowerCase().contains(q) ||
-          e.url.toLowerCase().contains(q);
-    }).toList()
-      ..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    final live = _live;
+    final visible = _visible;
+    final favCount = live.where((e) => e.favorite).length;
+    final weakCount = live.where(_isWeak).length;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Parola Kasası'),
-        actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Senkron',
-            icon: Icon(_syncOn ? Icons.sync : Icons.sync_disabled),
-            onSelected: _onSyncMenu,
-            itemBuilder: (_) => [
-              if (!_syncOn)
-                const PopupMenuItem(value: 'enable', child: Text('Senkronu aç')),
-              if (_syncOn)
-                const PopupMenuItem(value: 'now', child: Text('Şimdi senkronize et')),
-              if (_syncOn)
-                const PopupMenuItem(value: 'disable', child: Text('Senkronu kapat')),
-            ],
-          ),
-          IconButton(
-            tooltip: 'Kasayı kilitle',
-            icon: const Icon(Icons.lock_outline),
-            onPressed: () => _vault.lock(),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        tooltip: 'Yeni kayıt',
-        onPressed: _add,
-        child: const Icon(Icons.add),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: TextField(
-              onChanged: (v) => setState(() => _query = v),
-              decoration: const InputDecoration(
-                hintText: 'Ara',
-                prefixIcon: Icon(Icons.search),
-              ),
-            ),
-          ),
-          Expanded(
-            child: shown.isEmpty
-                ? Center(
-                    child: Text(
-                      _items.every((e) => e.deleted)
-                          ? 'Henüz kayıt yok. + ile ekleyebilirsin.'
-                          : 'Sonuç bulunamadı.',
-                      style: TextStyle(color: c.textSecondary),
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.only(bottom: 88),
-                    itemCount: shown.length,
-                    itemBuilder: (_, i) => _tile(shown[i]),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _tile(PassEntry e) {
-    final c = context.appColors;
-    final initial = e.title.isEmpty ? '?' : e.title[0].toUpperCase();
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: c.primary.withOpacity(0.15),
-        child: Text(initial,
-            style: TextStyle(color: c.primary, fontWeight: FontWeight.bold)),
-      ),
-      title: Text(e.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        e.username.isNotEmpty ? e.username : e.url,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: c.textSecondary, fontSize: 13),
-      ),
-      trailing: IconButton(
-        tooltip: 'Parolayı kopyala',
-        icon: const Icon(Icons.copy_outlined),
-        onPressed: () => _copy(e),
-      ),
-      onTap: () => _edit(e),
-      onLongPress: () => _confirmDelete(e),
-    );
-  }
-}
-
-// ============================================================
-// KİLİT EKRANI (kurulum veya açma)
-// ============================================================
-class _LockScreen extends StatefulWidget {
-  final bool isSetUp;
-  final Future<void> Function(String secret, bool isSetUp) onSubmit;
-
-  const _LockScreen({required this.isSetUp, required this.onSubmit});
-
-  @override
-  State<_LockScreen> createState() => _LockScreenState();
-}
-
-class _LockScreenState extends State<_LockScreen> {
-  final _secret = TextEditingController();
-  final _confirm = TextEditingController();
-  bool _obscure = true;
-  bool _busy = false;
-  String? _error;
-  PasswordReport _report = PasswordReport.evaluate('');
-
-  @override
-  void dispose() {
-    _secret.dispose();
-    _confirm.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    final text = _secret.text;
-    if (text.isEmpty) {
-      setState(() => _error = 'Parola gerekli');
-      return;
-    }
-    if (!widget.isSetUp) {
-      if (!_report.isAcceptable) {
-        setState(() => _error = 'Daha güçlü bir kasa parolası seç');
-        return;
-      }
-      if (_confirm.text != text) {
-        setState(() => _error = 'Parolalar eşleşmiyor');
-        return;
-      }
-    }
-
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await widget.onSubmit(text, widget.isSetUp);
-    } on SecurityException catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.appColors;
-    final setup = !widget.isSetUp;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Parola Kasası')),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      backgroundColor: c.background,
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          children: [
+            Row(
               children: [
-                Icon(Icons.shield_outlined, size: 56, color: c.primary),
-                const SizedBox(height: 16),
-                Text(
-                  setup ? 'Kasa parolanı oluştur' : 'Kasanı aç',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
+                Image.asset(_kPassLogo, width: 36, height: 36),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Gettic Pass',
+                    style: TextStyle(
                       color: c.textPrimary,
                       fontSize: 20,
-                      fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  setup
-                      ? 'Bu parola kasandaki tüm kayıtları açar. Uygulama hesap parolanızdan ayrıdır ve unutulursa kayıtlar kurtarılamaz.'
-                      : 'Kasa parolanı gir.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: c.textSecondary, fontSize: 13),
-                ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _secret,
-                  obscureText: _obscure,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  enableIMEPersonalizedLearning: false,
-                  onChanged: setup
-                      ? (v) => setState(
-                          () => _report = PasswordReport.evaluate(v))
-                      : null,
-                  onSubmitted: (_) => setup ? null : _submit(),
-                  decoration: InputDecoration(
-                    hintText: 'Kasa parolası',
-                    prefixIcon: const Icon(Icons.key_outlined),
-                    suffixIcon: IconButton(
-                      icon: Icon(_obscure
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined),
-                      onPressed: () => setState(() => _obscure = !_obscure),
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-                if (setup) ...[
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _confirm,
-                    obscureText: _obscure,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    decoration: const InputDecoration(
-                      hintText: 'Kasa parolasını tekrar gir',
-                      prefixIcon: Icon(Icons.key_outlined),
-                    ),
-                    onSubmitted: (_) => _submit(),
-                  ),
-                  const SizedBox(height: 12),
-                  _StrengthBar(report: _report),
-                ],
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_error!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: c.danger, fontSize: 13)),
-                ],
-                const SizedBox(height: 20),
                 SizedBox(
-                  height: 52,
+                  height: 40,
                   child: ElevatedButton(
-                    onPressed: _busy ? null : _submit,
-                    child: _busy
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
-                        : Text(setup ? 'Kasayı oluştur' : 'Aç'),
+                    onPressed: () => _add(),
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    child: const Text('+ Yeni'),
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Daha fazla',
+                  onSelected: _onSyncMenu,
+                  itemBuilder: (_) => [
+                    if (!_syncOn)
+                      const PopupMenuItem(
+                          value: 'enable', child: Text('Senkronu aç')),
+                    if (_syncOn)
+                      const PopupMenuItem(
+                          value: 'now', child: Text('Şimdi senkronize et')),
+                    if (_syncOn)
+                      const PopupMenuItem(
+                          value: 'disable', child: Text('Senkronu kapat')),
+                    const PopupMenuItem(value: 'lock', child: Text('Kasayı kilitle')),
+                  ],
+                  icon: Icon(
+                    _syncOn ? Icons.sync : Icons.sync_disabled,
+                    color: c.textSecondary,
                   ),
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                _stat('Toplam', live.length, c.primary),
+                const SizedBox(width: 10),
+                _stat('Favori', favCount, c.primary),
+                const SizedBox(width: 10),
+                _stat('Zayıf', weakCount, weakCount > 0 ? c.danger : c.primary),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              onChanged: (v) => setState(() => _query = v),
+              decoration: const InputDecoration(
+                hintText: 'Ara...',
+                prefixIcon: Icon(Icons.search),
+              ),
+            ),
+            const SizedBox(height: 10),
+            _dropdown<_Filter>(
+              value: _filter,
+              items: const {
+                _Filter.all: 'Tümü',
+                _Filter.favorites: 'Favoriler',
+                _Filter.weak: 'Zayıf parolalar',
+              },
+              onChanged: (v) => setState(() => _filter = v),
+            ),
+            const SizedBox(height: 10),
+            _dropdown<bool>(
+              value: _favoritesFirst,
+              items: const {
+                true: 'Favoriler önce',
+                false: 'A-Z',
+              },
+              onChanged: (v) => setState(() => _favoritesFirst = v),
+            ),
+            const SizedBox(height: 14),
+            if (visible.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 40),
+                child: Center(
+                  child: Text(
+                    live.isEmpty
+                        ? 'Henüz kayıt yok. "+ Yeni" ile ekleyebilirsin.'
+                        : 'Sonuç bulunamadı.',
+                    style: TextStyle(color: c.textSecondary),
+                  ),
+                ),
+              )
+            else
+              for (final e in visible)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _EntryCard(
+                    key: ValueKey(e.id),
+                    entry: e,
+                    weak: _isWeak(e),
+                    onToggleFavorite: () => _toggleFavorite(e),
+                    onCopyUser: () => _copy(e.username, 'Kullanıcı adı'),
+                    onCopyPassword: () => _copy(e.password, 'Parola'),
+                    onCopyCode: () => _copy(
+                        Totp.code(e.totpSecret), '2FA kodu'),
+                    onEdit: () => _edit(e),
+                    onDelete: () => _confirmDelete(e),
+                  ),
+                ),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _stat(String label, int value, Color color) {
+    final c = context.appColors;
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: c.border),
+        ),
+        child: Column(
+          children: [
+            Text(
+              '$value',
+              style: TextStyle(
+                color: color,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(label,
+                style: TextStyle(color: c.textSecondary, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dropdown<T>({
+    required T value,
+    required Map<T, String> items,
+    required ValueChanged<T> onChanged,
+  }) {
+    final c = context.appColors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: c.border),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          value: value,
+          isExpanded: true,
+          dropdownColor: c.surface,
+          style: TextStyle(color: c.textPrimary, fontSize: 15),
+          items: [
+            for (final e in items.entries)
+              DropdownMenuItem<T>(value: e.key, child: Text(e.value)),
+          ],
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// KAYIT KARTI
+// ============================================================
+class _EntryCard extends StatefulWidget {
+  final PassEntry entry;
+  final bool weak;
+  final VoidCallback onToggleFavorite;
+  final VoidCallback onCopyUser;
+  final VoidCallback onCopyPassword;
+  final VoidCallback onCopyCode;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _EntryCard({
+    super.key,
+    required this.entry,
+    required this.weak,
+    required this.onToggleFavorite,
+    required this.onCopyUser,
+    required this.onCopyPassword,
+    required this.onCopyCode,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  State<_EntryCard> createState() => _EntryCardState();
+}
+
+class _EntryCardState extends State<_EntryCard> {
+  bool _showPassword = false;
+  Timer? _ticker;
+
+  bool get _hasTotp => widget.entry.totpSecret.trim().isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_hasTotp) {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  String _totpText() {
+    try {
+      final code = Totp.code(widget.entry.totpSecret);
+      return '${code.substring(0, 3)} ${code.substring(3)}';
+    } on FormatException {
+      return 'Geçersiz anahtar';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.appColors;
+    final e = widget.entry;
+    final initial = e.title.isEmpty ? '?' : e.title[0].toUpperCase();
+    final mono = const TextStyle(fontFamily: 'monospace', fontSize: 14);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: c.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: c.surfaceVariant,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(initial,
+                    style: TextStyle(
+                        color: c.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  e.title.isEmpty ? 'Başlıksız' : e.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: c.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              if (widget.weak)
+                Container(
+                  margin: const EdgeInsets.only(right: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: c.danger),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text('Zayıf',
+                      style: TextStyle(color: c.danger, fontSize: 11)),
+                ),
+              IconButton(
+                tooltip: e.favorite ? 'Favoriden çıkar' : 'Favoriye ekle',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  e.favorite ? Icons.star : Icons.star_border,
+                  color: e.favorite ? Colors.amber : c.textHint,
+                ),
+                onPressed: widget.onToggleFavorite,
+              ),
+            ],
+          ),
+          if (e.url.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(e.url,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: c.textHint, fontSize: 12)),
+          ],
+          const SizedBox(height: 12),
+          _row(
+            'Kullanıcı',
+            Text(
+              e.username.isEmpty ? '-' : e.username,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: mono.copyWith(color: c.textPrimary),
+            ),
+          ),
+          _row(
+            'Şifre',
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _showPassword ? e.password : '•' * 10,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: mono.copyWith(color: c.textPrimary),
+                  ),
+                ),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 30),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  onPressed: () =>
+                      setState(() => _showPassword = !_showPassword),
+                  child: Text(_showPassword ? 'Gizle' : 'Göster'),
+                ),
+              ],
+            ),
+          ),
+          if (_hasTotp)
+            _row(
+              '2FA',
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _totpText(),
+                      style: mono.copyWith(
+                        color: c.online,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        CircularProgressIndicator(
+                          value: Totp.remaining() / 30,
+                          strokeWidth: 3,
+                          color: c.online,
+                          backgroundColor: c.border,
+                        ),
+                        Text('${Totp.remaining()}',
+                            style: TextStyle(
+                                color: c.textSecondary, fontSize: 9)),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(0, 30),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    onPressed: widget.onCopyCode,
+                    child: const Text('Kopyala'),
+                  ),
+                ],
+              ),
+            ),
+          if (e.notes.trim().isNotEmpty)
+            _row(
+              'Not',
+              Text(
+                e.notes,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: c.textSecondary, fontSize: 13),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Divider(color: c.border, height: 1),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _action('Kullanıcı', widget.onCopyUser),
+              const SizedBox(width: 8),
+              _action('Şifre', widget.onCopyPassword),
+              const SizedBox(width: 8),
+              _action('Düzenle', widget.onEdit),
+              const SizedBox(width: 8),
+              _action('Sil', widget.onDelete, danger: true),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String label, Widget value) {
+    final c = context.appColors;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 78,
+            child: Text(label,
+                style: TextStyle(color: c.textSecondary, fontSize: 13)),
+          ),
+          Expanded(child: value),
+        ],
+      ),
+    );
+  }
+
+  Widget _action(String label, VoidCallback onTap, {bool danger = false}) {
+    final c = context.appColors;
+    return Expanded(
+      child: OutlinedButton(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          side: BorderSide(color: c.border),
+          foregroundColor: danger ? c.danger : c.textSecondary,
+        ),
+        child: Text(label, style: const TextStyle(fontSize: 12)),
       ),
     );
   }
@@ -613,6 +928,8 @@ class _EntryEditorState extends State<_EntryEditor> {
       TextEditingController(text: widget.entry?.password ?? '');
   late final TextEditingController _url =
       TextEditingController(text: widget.entry?.url ?? '');
+  late final TextEditingController _totp =
+      TextEditingController(text: widget.entry?.totpSecret ?? '');
   late final TextEditingController _notes =
       TextEditingController(text: widget.entry?.notes ?? '');
 
@@ -627,11 +944,9 @@ class _EntryEditorState extends State<_EntryEditor> {
 
   @override
   void dispose() {
-    _title.dispose();
-    _user.dispose();
-    _pass.dispose();
-    _url.dispose();
-    _notes.dispose();
+    for (final c in [_title, _user, _pass, _url, _totp, _notes]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -646,6 +961,8 @@ class _EntryEditorState extends State<_EntryEditor> {
   void _save() {
     final title = _title.text.trim();
     final pass = _pass.text;
+    final totp = _totp.text.trim().replaceAll(' ', '');
+
     if (title.isEmpty) {
       setState(() => _error = 'Başlık gerekli');
       return;
@@ -654,6 +971,11 @@ class _EntryEditorState extends State<_EntryEditor> {
       setState(() => _error = 'Parola gerekli');
       return;
     }
+    if (totp.isNotEmpty && !Totp.isValidSecret(totp)) {
+      setState(() => _error = '2FA anahtarı geçersiz (yalnızca A-Z ve 2-7)');
+      return;
+    }
+
     Navigator.pop(
       context,
       PassEntry(
@@ -663,6 +985,8 @@ class _EntryEditorState extends State<_EntryEditor> {
         password: pass,
         url: _url.text.trim(),
         notes: _notes.text.trim(),
+        totpSecret: totp,
+        favorite: widget.entry?.favorite ?? false,
         updatedAt: DateTime.now().millisecondsSinceEpoch,
         deleted: false,
       ),
@@ -699,15 +1023,17 @@ class _EntryEditorState extends State<_EntryEditor> {
             Text(
               widget.entry == null ? 'Yeni kayıt' : 'Kaydı düzenle',
               style: TextStyle(
-                  color: c.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700),
+                color: c.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _title,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(hintText: 'Başlık (ör. Instagram)'),
+              decoration:
+                  const InputDecoration(hintText: 'Başlık (ör. Instagram)'),
               onChanged: (_) => _recalc(),
             ),
             const SizedBox(height: 12),
@@ -715,7 +1041,8 @@ class _EntryEditorState extends State<_EntryEditor> {
               controller: _user,
               autocorrect: false,
               enableSuggestions: false,
-              decoration: const InputDecoration(hintText: 'Kullanıcı adı veya e-posta'),
+              decoration: const InputDecoration(
+                  hintText: 'Kullanıcı adı veya e-posta'),
               onChanged: (_) => _recalc(),
             ),
             const SizedBox(height: 12),
@@ -756,13 +1083,26 @@ class _EntryEditorState extends State<_EntryEditor> {
               controller: _url,
               keyboardType: TextInputType.url,
               autocorrect: false,
-              decoration: const InputDecoration(hintText: 'Site adresi (isteğe bağlı)'),
+              decoration:
+                  const InputDecoration(hintText: 'Site adresi (isteğe bağlı)'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _totp,
+              autocorrect: false,
+              enableSuggestions: false,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                hintText: '2FA gizli anahtarı (isteğe bağlı)',
+                prefixIcon: Icon(Icons.pin_outlined),
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _notes,
               maxLines: 3,
-              decoration: const InputDecoration(hintText: 'Not (isteğe bağlı)'),
+              decoration:
+                  const InputDecoration(hintText: 'Not (isteğe bağlı)'),
             ),
             if (_error != null) ...[
               const SizedBox(height: 10),
