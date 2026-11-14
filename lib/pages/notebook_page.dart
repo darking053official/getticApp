@@ -18,6 +18,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/security.dart';
 import '../core/theme.dart';
 import 'vault_gate.dart';
+import '../services/cloud_notebook.dart';
+import '../services/cloud_vaults.dart';
+import '../services/web_crypto.dart';
 
 const String _kNotebookLogo = 'assets/getticnotebook_logo.png';
 const String _kTabAll = '__all__';
@@ -34,6 +37,7 @@ class NoteItem {
   final String folder; // boşsa klasörsüz
   final bool pinned;
   final int updatedAt; // ms
+  final bool deleted; // silinmiş (senkron için tombstone)
 
   const NoteItem({
     required this.id,
@@ -42,13 +46,20 @@ class NoteItem {
     required this.folder,
     required this.pinned,
     required this.updatedAt,
+    this.deleted = false,
   });
 
-  static String newId() {
-    final r = Random.secure();
-    final t = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-    return '$t${r.nextInt(1 << 30).toRadixString(36)}';
-  }
+  static NoteItem tombstone(NoteItem n) => NoteItem(
+        id: n.id,
+        title: '',
+        body: '',
+        folder: '',
+        pinned: false,
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+        deleted: true,
+      );
+
+  static String newId() => WebCrypto.uuidV4();
 
   factory NoteItem.fromJson(Map<String, dynamic> j) => NoteItem(
         id: j['id'] as String,
@@ -57,6 +68,7 @@ class NoteItem {
         folder: (j['folder'] ?? '') as String,
         pinned: (j['pinned'] ?? false) as bool,
         updatedAt: (j['updatedAt'] ?? 0) as int,
+        deleted: (j['deleted'] ?? false) as bool,
       );
 
   Map<String, dynamic> toJson() => {
@@ -66,6 +78,7 @@ class NoteItem {
         'folder': folder,
         'pinned': pinned,
         'updatedAt': updatedAt,
+        'deleted': deleted,
       };
 }
 
@@ -86,36 +99,12 @@ class NoteResult {
 class NotebookRepository {
   NotebookRepository._();
 
-  static const String _encKey = 'notebook_notes_enc_v1';
-  static const String _legacyKey = 'notebook_notes_v1'; // eski düz kayıt
+  /// Notları sunucudan çeker (defter açık olmalı)
+  static Future<List<NoteItem>> load() => NotebookCloud.instance.fetchAll();
 
-  static Future<List<NoteItem>> load() async {
-    final enc = await EncryptedPrefs.read(_encKey);
-    if (enc != null) return _decode(enc);
-
-    // Eski düz kayıt varsa şifreli depoya taşı
-    final p = await SharedPreferences.getInstance();
-    final legacy = p.getString(_legacyKey);
-    if (legacy != null && legacy.isNotEmpty) {
-      final notes = _decode(legacy);
-      await save(notes);
-      await p.remove(_legacyKey);
-      return notes;
-    }
-    return [];
-  }
-
-  static Future<void> save(List<NoteItem> notes) {
-    final json = jsonEncode(notes.map((n) => n.toJson()).toList());
-    return EncryptedPrefs.write(_encKey, json);
-  }
-
-  static List<NoteItem> _decode(String raw) {
-    final list = jsonDecode(raw) as List<dynamic>;
-    return list
-        .map((e) => NoteItem.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
-  }
+  /// Notları sunucuya yazar (silinmişler dahil)
+  static Future<void> save(List<NoteItem> notes) =>
+      NotebookCloud.instance.saveAll(notes);
 }
 
 // ============================================================
@@ -127,6 +116,7 @@ class NotebookPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return VaultGate(
+      vault: NotebookCloud.instance,
       lockedTitle: 'Defter kilitli',
       lockedHint:
           'Notların cihazında şifrelenir. Devam etmek için defter şifreni gir.',
@@ -163,6 +153,7 @@ class _NotebookBodyState extends State<_NotebookBody> {
         _notes = notes;
         _loading = false;
       });
+      // Açılışta diğer cihazlardaki değişiklikleri çek
     } on SecurityException catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -173,6 +164,7 @@ class _NotebookBodyState extends State<_NotebookBody> {
   // ---------- Türetilmiş veriler ----------
   List<String> get _folders {
     final set = _notes
+        .where((n) => !n.deleted)
         .map((n) => n.folder)
         .where((f) => f.trim().isNotEmpty)
         .toSet()
@@ -197,6 +189,7 @@ class _NotebookBodyState extends State<_NotebookBody> {
   List<NoteItem> get _visible {
     final q = _query.trim().toLowerCase();
     final list = _notes.where((n) {
+      if (n.deleted) return false;
       if (!_matchesTab(n, _tab)) return false;
       if (q.isEmpty) return true;
       return n.title.toLowerCase().contains(q) ||
@@ -211,7 +204,13 @@ class _NotebookBodyState extends State<_NotebookBody> {
   }
 
   int _countFor(String tab) =>
-      _notes.where((n) => _matchesTab(n, tab)).length;
+      _notes.where((n) => !n.deleted && _matchesTab(n, tab)).length;
+
+  /// Notu silinmiş olarak işaretler (senkronda silme yayılsın diye listeden hemen çıkarılmaz)
+  void _markDeleted(String id) {
+    final idx = _notes.indexWhere((n) => n.id == id);
+    if (idx != -1) _notes[idx] = NoteItem.tombstone(_notes[idx]);
+  }
 
   // ---------- Eylemler ----------
   Future<void> _persist() async {
@@ -231,7 +230,7 @@ class _NotebookBodyState extends State<_NotebookBody> {
     if (result == null || !mounted) return;
 
     if (result.deletedId != null) {
-      _notes.removeWhere((n) => n.id == result.deletedId);
+      _markDeleted(result.deletedId!);
     } else if (result.note != null) {
       final saved = result.note!;
       final idx = _notes.indexWhere((n) => n.id == saved.id);
@@ -280,11 +279,11 @@ class _NotebookBodyState extends State<_NotebookBody> {
       ),
     );
     if (ok != true) return;
-    _notes.removeWhere((x) => x.id == n.id);
+    _markDeleted(n.id);
     await _persist();
   }
 
-  void _lock() => SecureVault.instance.lock();
+  void _lock() => NotebookCloud.instance.lock();
 
   Future<void> _signOut() => Supabase.instance.client.auth.signOut();
 
@@ -382,7 +381,7 @@ class _NotebookBodyState extends State<_NotebookBody> {
                   : visible.isEmpty
                       ? Center(
                           child: Text(
-                            _notes.isEmpty
+                            _notes.every((n) => n.deleted)
                                 ? 'Henüz not yok. "+ Yeni" ile ekleyebilirsin.'
                                 : 'Sonuç bulunamadı.',
                             style: TextStyle(color: c.textSecondary),
