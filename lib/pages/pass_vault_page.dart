@@ -21,7 +21,8 @@ import 'package:flutter/material.dart';
 
 import '../core/security.dart';
 import '../core/theme.dart';
-import '../services/pass_sync.dart';
+import '../services/cloud_pass.dart';
+import '../services/web_crypto.dart';
 import 'vault_gate.dart';
 
 const String _kPassLogo = 'assets/getticpass_logo.png';
@@ -57,11 +58,7 @@ class PassEntry {
     this.deleted = false,
   });
 
-  static String newId() {
-    final r = Random.secure();
-    final t = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-    return '$t-${r.nextInt(1 << 30).toRadixString(36)}';
-  }
+  static String newId() => WebCrypto.uuidV4();
 
   static PassEntry tombstone(PassEntry e) => PassEntry(
         id: e.id,
@@ -106,21 +103,13 @@ class PassEntry {
 // ============================================================
 class PassRepository {
   PassRepository._();
-  static const String _key = 'pass_entries_v1';
 
-  static Future<List<PassEntry>> load() async {
-    final raw = await EncryptedPrefs.read(_key);
-    if (raw == null || raw.isEmpty) return [];
-    final list = jsonDecode(raw) as List<dynamic>;
-    return list
-        .map((e) => PassEntry.fromJson(Map<String, dynamic>.from(e as Map)))
-        .toList();
-  }
+  /// Kayıtları sunucudan çeker (kasa açık olmalı)
+  static Future<List<PassEntry>> load() => PassCloud.instance.fetchAll();
 
-  static Future<void> save(List<PassEntry> items) {
-    final json = jsonEncode(items.map((e) => e.toJson()).toList());
-    return EncryptedPrefs.write(_key, json);
-  }
+  /// Listeyi sunucuya yazar
+  static Future<void> save(List<PassEntry> items) =>
+      PassCloud.instance.saveAll(items);
 }
 
 // ============================================================
@@ -219,6 +208,7 @@ class PassVaultPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return VaultGate(
+      vault: PassCloud.instance,
       lockedTitle: 'Kasa Kilitli',
       lockedHint: 'Devam etmek için kasa ana şifreni gir',
       logoAsset: _kPassLogo,
@@ -241,7 +231,6 @@ class _PassBodyState extends State<_PassBody> {
   String _query = '';
   _Filter _filter = _Filter.all;
   bool _favoritesFirst = true;
-  bool _syncOn = false;
 
   @override
   void initState() {
@@ -253,15 +242,8 @@ class _PassBodyState extends State<_PassBody> {
   Future<void> _loadItems() async {
     try {
       final items = await PassRepository.load();
-      final on = await PassSync.instance.isEnabled();
       if (!mounted) return;
-      setState(() {
-        _items = items;
-        _syncOn = on;
-      });
-      if (on) {
-        PassSync.instance.scheduleSync(delay: const Duration(milliseconds: 300));
-      }
+      setState(() => _items = items);
     } on SecurityException catch (e) {
       _snack(e.message, isError: true);
     }
@@ -271,7 +253,6 @@ class _PassBodyState extends State<_PassBody> {
     try {
       await PassRepository.save(_items);
       if (mounted) setState(() {});
-      if (_syncOn) PassSync.instance.scheduleSync();
     } on SecurityException catch (e) {
       _snack(e.message, isError: true);
     }
@@ -393,35 +374,6 @@ class _PassBodyState extends State<_PassBody> {
     );
   }
 
-  Future<void> _onSyncMenu(String v) async {
-    switch (v) {
-      case 'enable':
-        await showPassSyncSetup(context);
-        await _loadItems();
-        break;
-      case 'now':
-        try {
-          await PassSync.instance.sync();
-          _snack('Senkronize edildi');
-          await _loadItems();
-        } on SecurityException catch (e) {
-          _snack(e.message, isError: true);
-        } catch (_) {
-          _snack('Senkron yapılamadı. İnternet bağlantınızı kontrol edin.',
-              isError: true);
-        }
-        break;
-      case 'disable':
-        await PassSync.instance.disable();
-        if (mounted) setState(() => _syncOn = false);
-        _snack('Senkron kapatıldı. Sunucudaki kopya silinmedi.');
-        break;
-      case 'lock':
-        SecureVault.instance.lock();
-        break;
-    }
-  }
-
   void _snack(String msg, {bool isError = false}) {
     if (!mounted) return;
     final c = context.appColors;
@@ -474,25 +426,10 @@ class _PassBodyState extends State<_PassBody> {
                     child: const Text('+ Yeni'),
                   ),
                 ),
-                PopupMenuButton<String>(
-                  tooltip: 'Daha fazla',
-                  onSelected: _onSyncMenu,
-                  itemBuilder: (_) => [
-                    if (!_syncOn)
-                      const PopupMenuItem(
-                          value: 'enable', child: Text('Senkronu aç')),
-                    if (_syncOn)
-                      const PopupMenuItem(
-                          value: 'now', child: Text('Şimdi senkronize et')),
-                    if (_syncOn)
-                      const PopupMenuItem(
-                          value: 'disable', child: Text('Senkronu kapat')),
-                    const PopupMenuItem(value: 'lock', child: Text('Kasayı kilitle')),
-                  ],
-                  icon: Icon(
-                    _syncOn ? Icons.sync : Icons.sync_disabled,
-                    color: c.textSecondary,
-                  ),
+                IconButton(
+                  tooltip: 'Kasayı kilitle',
+                  icon: Icon(Icons.lock_outline, color: c.textSecondary),
+                  onPressed: () => PassCloud.instance.lock(),
                 ),
               ],
             ),
