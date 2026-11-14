@@ -1,20 +1,18 @@
 // ============================================================
 // lib/core/app_settings.dart
-// (Bu dosya .txt olarak verildi. Projeye eklerken adını
-//  app_settings.dart yapın ve lib/core/ klasörüne koyun.)
+// (.txt olarak verildi. Projeye eklerken adını app_settings.dart yapın.)
+//
+// Cihazda saklanan uygulama ayarları. Her alan gerçekten kullanılıyor:
+//  - Görünüm: main.dart (tema, yazı boyutu)
+//  - Gizlilik: chat_room_page (okundu bilgisi, yazıyor göstergesi)
+//  - Bildirim: main.dart (ön plan bildirimleri)
+//  - Medya: chat_room_page (otomatik yükleme) -> autoLoad(type)
+//  - Güvenlik: main.dart (otomatik kilit süresi)
 // ============================================================
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Cihazda saklanan uygulama ayarları.
-///
-/// Kullanım:
-///   await AppSettings.instance.ensureLoaded();
-///   final s = AppSettings.instance;
-///   await s.update(() => s.fontScale = 1.2);
-///
-/// Değişiklik kaydedilir ve dinleyenler (ListenableBuilder vb.) yeniden çizilir.
 class AppSettings extends ChangeNotifier {
   AppSettings._();
   static final AppSettings instance = AppSettings._();
@@ -23,88 +21,47 @@ class AppSettings extends ChangeNotifier {
 
   SharedPreferences? _prefs;
   Future<void>? _loading;
-  bool get isLoaded => _prefs != null;
-
-  // ---- Gizlilik ----
-  bool showReadReceipts = true;
-  bool showTypingIndicator = true;
-  bool blockUnknownMessages = false;
-
-  // ---- Bildirimler ----
-  bool notifSound = true;
-  bool notifVibrate = true;
-  bool notifPreview = true;
-  bool notifLed = true;
-  bool notifGroupSummary = true;
-  String notifSoundTone = 'Varsayılan';
 
   // ---- Görünüm ----
   bool useSystemTheme = true;
-  String themeMode = 'Karanlık'; // 'Karanlık' | 'Aydınlık' | 'Sistem'
-  String chatWallpaper = 'Varsayılan';
-  double fontScale = 1.0;
-  bool highContrast = false;
+  String themeMode = 'Karanlık'; // 'Karanlık' | 'Aydınlık'
+  double fontScale = 1.0; // 0.8 - 1.5
 
-  // ---- Veri ----
-  bool autoDownloadWifi = true;
-  bool autoDownloadMobile = false;
-  bool autoDownloadPhotos = true;
-  bool autoDownloadVideos = false;
-  bool autoDownloadDocs = true;
+  // ---- Gizlilik ----
+  bool showReadReceipts = true; // kapalıysa mesajlar okundu işaretlenmez
+  bool showTypingIndicator = true;
 
-  // ---- Dil ----
-  String language = 'Türkçe';
+  // ---- Bildirim ----
+  bool inAppNotifications = true; // kapalıysa uygulama açıkken bildirim gösterilmez
 
-  // ---- Gelişmiş ----
-  bool experimentalFeatures = false;
-  bool verboseLogging = false;
+  // ---- Medya otomatik yükleme ----
+  bool autoLoadPhotos = true;
+  bool autoLoadVideos = false;
+  bool autoLoadAudio = true;
+  bool autoLoadFiles = false;
+
+  // ---- Güvenlik ----
+  int autoLockMinutes = 2; // 0 = kapalı
+
+  bool get isLoaded => _prefs != null;
 
   /// Birden çok kez çağrılabilir; yükleme yalnızca bir kez yapılır.
   Future<void> ensureLoaded() => _loading ??= _load();
 
-  Future<void> _load() async {
-    try {
-      final p = await SharedPreferences.getInstance();
-      _prefs = p;
-
-      showReadReceipts = p.getBool('${_p}showReadReceipts') ?? showReadReceipts;
-      showTypingIndicator =
-          p.getBool('${_p}showTypingIndicator') ?? showTypingIndicator;
-      blockUnknownMessages =
-          p.getBool('${_p}blockUnknownMessages') ?? blockUnknownMessages;
-
-      notifSound = p.getBool('${_p}notifSound') ?? notifSound;
-      notifVibrate = p.getBool('${_p}notifVibrate') ?? notifVibrate;
-      notifPreview = p.getBool('${_p}notifPreview') ?? notifPreview;
-      notifLed = p.getBool('${_p}notifLed') ?? notifLed;
-      notifGroupSummary =
-          p.getBool('${_p}notifGroupSummary') ?? notifGroupSummary;
-      notifSoundTone = p.getString('${_p}notifSoundTone') ?? notifSoundTone;
-
-      useSystemTheme = p.getBool('${_p}useSystemTheme') ?? useSystemTheme;
-      themeMode = p.getString('${_p}themeMode') ?? themeMode;
-      chatWallpaper = p.getString('${_p}chatWallpaper') ?? chatWallpaper;
-      fontScale = (p.getDouble('${_p}fontScale') ?? fontScale).clamp(0.8, 1.5);
-      highContrast = p.getBool('${_p}highContrast') ?? highContrast;
-
-      autoDownloadWifi = p.getBool('${_p}autoDownloadWifi') ?? autoDownloadWifi;
-      autoDownloadMobile =
-          p.getBool('${_p}autoDownloadMobile') ?? autoDownloadMobile;
-      autoDownloadPhotos =
-          p.getBool('${_p}autoDownloadPhotos') ?? autoDownloadPhotos;
-      autoDownloadVideos =
-          p.getBool('${_p}autoDownloadVideos') ?? autoDownloadVideos;
-      autoDownloadDocs = p.getBool('${_p}autoDownloadDocs') ?? autoDownloadDocs;
-
-      language = p.getString('${_p}language') ?? language;
-
-      experimentalFeatures =
-          p.getBool('${_p}experimentalFeatures') ?? experimentalFeatures;
-      verboseLogging = p.getBool('${_p}verboseLogging') ?? verboseLogging;
-
-      notifyListeners();
-    } catch (_) {
-      // Okunamazsa varsayılan değerlerle devam et
+  /// Bu medya türü otomatik yüklensin mi?
+  bool autoLoad(String type) {
+    switch (type) {
+      case 'image':
+      case 'gif':
+        return autoLoadPhotos;
+      case 'video':
+        return autoLoadVideos;
+      case 'audio':
+        return autoLoadAudio;
+      case 'file':
+        return autoLoadFiles;
+      default:
+        return true;
     }
   }
 
@@ -117,30 +74,88 @@ class AppSettings extends ChangeNotifier {
 
   /// Tüm ayarları varsayılana döndürür.
   Future<void> reset() async {
-    showReadReceipts = true;
-    showTypingIndicator = true;
-    blockUnknownMessages = false;
-    notifSound = true;
-    notifVibrate = true;
-    notifPreview = true;
-    notifLed = true;
-    notifGroupSummary = true;
-    notifSoundTone = 'Varsayılan';
     useSystemTheme = true;
     themeMode = 'Karanlık';
-    chatWallpaper = 'Varsayılan';
     fontScale = 1.0;
-    highContrast = false;
-    autoDownloadWifi = true;
-    autoDownloadMobile = false;
-    autoDownloadPhotos = true;
-    autoDownloadVideos = false;
-    autoDownloadDocs = true;
-    language = 'Türkçe';
-    experimentalFeatures = false;
-    verboseLogging = false;
+    showReadReceipts = true;
+    showTypingIndicator = true;
+    inAppNotifications = true;
+    autoLoadPhotos = true;
+    autoLoadVideos = false;
+    autoLoadAudio = true;
+    autoLoadFiles = false;
+    autoLockMinutes = 2;
     notifyListeners();
     await _save();
+  }
+
+  /// Dışa aktarma için ayarların JSON karşılığı (şifre içermez).
+  Map<String, dynamic> toJson() => {
+        'useSystemTheme': useSystemTheme,
+        'themeMode': themeMode,
+        'fontScale': fontScale,
+        'showReadReceipts': showReadReceipts,
+        'showTypingIndicator': showTypingIndicator,
+        'inAppNotifications': inAppNotifications,
+        'autoLoadPhotos': autoLoadPhotos,
+        'autoLoadVideos': autoLoadVideos,
+        'autoLoadAudio': autoLoadAudio,
+        'autoLoadFiles': autoLoadFiles,
+        'autoLockMinutes': autoLockMinutes,
+      };
+
+  /// İçe aktarma: geçerli alanları uygular, bilinmeyenleri yok sayar.
+  Future<void> importJson(Map<String, dynamic> j) async {
+    bool b(String k, bool d) => j[k] is bool ? j[k] as bool : d;
+    String s(String k, String d) => j[k] is String ? j[k] as String : d;
+
+    final theme = s('themeMode', themeMode);
+    final scale = j['fontScale'] is num ? (j['fontScale'] as num).toDouble() : fontScale;
+    final lock = j['autoLockMinutes'] is num ? (j['autoLockMinutes'] as num).toInt() : autoLockMinutes;
+
+    useSystemTheme = b('useSystemTheme', useSystemTheme);
+    themeMode = (theme == 'Karanlık' || theme == 'Aydınlık') ? theme : themeMode;
+    fontScale = scale.clamp(0.8, 1.5).toDouble();
+    showReadReceipts = b('showReadReceipts', showReadReceipts);
+    showTypingIndicator = b('showTypingIndicator', showTypingIndicator);
+    inAppNotifications = b('inAppNotifications', inAppNotifications);
+    autoLoadPhotos = b('autoLoadPhotos', autoLoadPhotos);
+    autoLoadVideos = b('autoLoadVideos', autoLoadVideos);
+    autoLoadAudio = b('autoLoadAudio', autoLoadAudio);
+    autoLoadFiles = b('autoLoadFiles', autoLoadFiles);
+    autoLockMinutes = const [0, 1, 2, 5, 15].contains(lock) ? lock : autoLockMinutes;
+
+    notifyListeners();
+    await _save();
+  }
+
+  // ----------------------------------------------------------
+  // Depolama
+  // ----------------------------------------------------------
+  Future<void> _load() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      _prefs = p;
+
+      bool b(String k, bool d) => p.getBool('$_p$k') ?? d;
+      String s(String k, String d) => p.getString('$_p$k') ?? d;
+
+      useSystemTheme = b('useSystemTheme', useSystemTheme);
+      themeMode = s('themeMode', themeMode);
+      fontScale = (p.getDouble('${_p}fontScale') ?? fontScale).clamp(0.8, 1.5).toDouble();
+      showReadReceipts = b('showReadReceipts', showReadReceipts);
+      showTypingIndicator = b('showTypingIndicator', showTypingIndicator);
+      inAppNotifications = b('inAppNotifications', inAppNotifications);
+      autoLoadPhotos = b('autoLoadPhotos', autoLoadPhotos);
+      autoLoadVideos = b('autoLoadVideos', autoLoadVideos);
+      autoLoadAudio = b('autoLoadAudio', autoLoadAudio);
+      autoLoadFiles = b('autoLoadFiles', autoLoadFiles);
+      autoLockMinutes = p.getInt('${_p}autoLockMinutes') ?? autoLockMinutes;
+
+      notifyListeners();
+    } catch (_) {
+      // Okunamazsa varsayılanlarla devam et
+    }
   }
 
   Future<void> _save() async {
@@ -148,35 +163,19 @@ class AppSettings extends ChangeNotifier {
       final p = _prefs ?? await SharedPreferences.getInstance();
       _prefs = p;
 
-      await p.setBool('${_p}showReadReceipts', showReadReceipts);
-      await p.setBool('${_p}showTypingIndicator', showTypingIndicator);
-      await p.setBool('${_p}blockUnknownMessages', blockUnknownMessages);
-
-      await p.setBool('${_p}notifSound', notifSound);
-      await p.setBool('${_p}notifVibrate', notifVibrate);
-      await p.setBool('${_p}notifPreview', notifPreview);
-      await p.setBool('${_p}notifLed', notifLed);
-      await p.setBool('${_p}notifGroupSummary', notifGroupSummary);
-      await p.setString('${_p}notifSoundTone', notifSoundTone);
-
       await p.setBool('${_p}useSystemTheme', useSystemTheme);
       await p.setString('${_p}themeMode', themeMode);
-      await p.setString('${_p}chatWallpaper', chatWallpaper);
       await p.setDouble('${_p}fontScale', fontScale);
-      await p.setBool('${_p}highContrast', highContrast);
-
-      await p.setBool('${_p}autoDownloadWifi', autoDownloadWifi);
-      await p.setBool('${_p}autoDownloadMobile', autoDownloadMobile);
-      await p.setBool('${_p}autoDownloadPhotos', autoDownloadPhotos);
-      await p.setBool('${_p}autoDownloadVideos', autoDownloadVideos);
-      await p.setBool('${_p}autoDownloadDocs', autoDownloadDocs);
-
-      await p.setString('${_p}language', language);
-
-      await p.setBool('${_p}experimentalFeatures', experimentalFeatures);
-      await p.setBool('${_p}verboseLogging', verboseLogging);
+      await p.setBool('${_p}showReadReceipts', showReadReceipts);
+      await p.setBool('${_p}showTypingIndicator', showTypingIndicator);
+      await p.setBool('${_p}inAppNotifications', inAppNotifications);
+      await p.setBool('${_p}autoLoadPhotos', autoLoadPhotos);
+      await p.setBool('${_p}autoLoadVideos', autoLoadVideos);
+      await p.setBool('${_p}autoLoadAudio', autoLoadAudio);
+      await p.setBool('${_p}autoLoadFiles', autoLoadFiles);
+      await p.setInt('${_p}autoLockMinutes', autoLockMinutes);
     } catch (_) {
-      // Kayıt başarısızsa uygulama çökmesin; bir sonraki değişiklikte tekrar denenir
+      // Yazılamazsa bir sonraki değişiklikte tekrar denenir
     }
   }
 }
