@@ -87,9 +87,8 @@ Veri akışı tek yönlüdür: sayfalar (`pages`) yalnızca servis katmanı ve R
 | Rol | Kullanıcı |
 |---|---|
 | Proje Geliştiricisi | [@darking053](https://git.disroot.org/darking053) |
-| Katkı Sağlayan | [@anbu141](https://git.disroot.org/anbu141) |
 
-Gettic, [@darking053](https://git.disroot.org/darking053) tarafından geliştirilmektedir; [@anbu141](https://git.disroot.org/anbu141) projeye katkı vermektedir.
+Gettic, [@darking053](https://git.disroot.org/darking053) tarafından geliştirilmektedir.
 
 ## Katkıda Bulunma
 
@@ -102,5 +101,5 @@ Bu proje [GPLv3 Lisansı](LICENSE) ile lisanslanmıştır.
 ---
 
 <p align="center">
-  <sub>Gettic, <a href="https://git.disroot.org/darking053">darking053</a> tarafından geliştirilmektedir · <a href="https://git.disroot.org/anbu141">anbu141</a> tarafından katkı verilmektedir.</sub>
+  <sub>Gettic, <a href="https://git.disroot.org/darking053">darking053</a> tarafından geliştirilmektedir.
 </p>
