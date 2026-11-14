@@ -1,6 +1,11 @@
 // ============================================================
 // lib/main.dart
 // (.txt olarak verildi. Projeye eklerken adını main.dart yapın.)
+//
+// Ayar bağlantıları:
+//  - Tema / yazı boyutu: AppSettings -> MaterialApp
+//  - Otomatik kilit: uygulama arka plana gidince AppSettings.autoLockMinutes kontrol edilir
+//  - Uygulama içi bildirim: AppSettings.inAppNotifications
 // ============================================================
 
 import 'dart:async';
@@ -38,7 +43,7 @@ void main() async {
     anonKey: AppConstants.supabaseAnonKey,
   );
 
-  // Ayarlar runApp'ten önce yüklenir: tema titremez
+  // Ayarlar runApp'ten önce yüklenir: tema ve yazı boyutu titremez
   await AppSettings.instance.ensureLoaded();
 
   // Google Auth callback (web)
@@ -63,10 +68,15 @@ void main() async {
 
   WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
 
-  // Kullanıcı zaten o sohbetteyse bildirimi gösterme
+  // Uygulama açıkken bildirim: ayar kapalıysa, ya da kullanıcı zaten o sohbetteyse gösterme
   OneSignal.Notifications.addForegroundWillDisplayListener((event) {
     final conversationId =
         event.notification.additionalData?['conversation_id'] as String?;
+
+    if (!AppSettings.instance.inAppNotifications) {
+      event.preventDefault();
+      return;
+    }
     if (conversationId != null &&
         !AppState().shouldShowNotification(conversationId)) {
       event.preventDefault();
@@ -77,7 +87,7 @@ void main() async {
 }
 
 // ==========================================
-// UYGULAMA KÖKÜ (tema ve yazı boyutu ayarlara bağlı)
+// UYGULAMA KÖKÜ
 // ==========================================
 class GetticApp extends StatelessWidget {
   const GetticApp({super.key});
@@ -114,23 +124,39 @@ class GetticApp extends StatelessWidget {
 }
 
 // ==========================================
-// UYGULAMA HAYAT DÖNGÜSÜ
+// UYGULAMA HAYAT DÖNGÜSÜ + OTOMATİK KİLİT
 // ==========================================
 class _AppLifecycleObserver extends WidgetsBindingObserver {
+  DateTime? _pausedAt;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+
     if (state == AppLifecycleState.resumed) {
       AppState().setAppInForeground(true);
+      _applyAutoLock();
     } else if (state == AppLifecycleState.paused) {
       AppState().setAppInForeground(false);
+      _pausedAt = DateTime.now();
+    }
+  }
+
+  /// Arka planda ayarlanan süreden uzun kalındıysa kasayı kilitler.
+  void _applyAutoLock() {
+    final minutes = AppSettings.instance.autoLockMinutes;
+    final pausedAt = _pausedAt;
+    _pausedAt = null;
+
+    if (minutes <= 0 || pausedAt == null) return;
+    if (DateTime.now().difference(pausedAt) >= Duration(minutes: minutes)) {
+      SecureVault.instance.lock();
     }
   }
 }
 
 // ==========================================
 // AUTH WRAPPER
-// Sabit splash beklemesi yok: oturum durumu bilinince doğrudan açılır.
 // ==========================================
 class AuthWrapper extends ConsumerStatefulWidget {
   const AuthWrapper({super.key});
