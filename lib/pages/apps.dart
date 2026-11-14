@@ -43,6 +43,7 @@ class AppsPage extends StatelessWidget {
             ),
             _AppCard(
               icon: Icons.chat_bubble_outline,
+              logoAsset: 'assets/logo.png',
               title: 'Sohbet',
               subtitle: 'Mesajlar ve gruplar',
               onTap: () => Navigator.push(
@@ -53,7 +54,8 @@ class AppsPage extends StatelessWidget {
             const SizedBox(height: 12),
             _AppCard(
               icon: Icons.key_outlined,
-              title: 'Parola Kasası',
+              logoAsset: 'assets/getticpass_logo.png',
+              title: 'Gettic Pass',
               subtitle: 'Şifreli parolalar, eklentiyle senkron',
               onTap: () => Navigator.push(
                 context,
@@ -63,7 +65,8 @@ class AppsPage extends StatelessWidget {
             const SizedBox(height: 12),
             _AppCard(
               icon: Icons.menu_book_outlined,
-              title: 'Notebook',
+              logoAsset: 'assets/getticnotebook_logo.png',
+              title: 'Gettic Notebook',
               subtitle: 'Kişisel notlar',
               onTap: () => Navigator.push(
                 context,
@@ -79,12 +82,14 @@ class AppsPage extends StatelessWidget {
 
 class _AppCard extends StatelessWidget {
   final IconData icon;
+  final String? logoAsset;
   final String title;
   final String subtitle;
   final VoidCallback? onTap;
 
   const _AppCard({
     required this.icon,
+    this.logoAsset,
     required this.title,
     required this.subtitle,
     required this.onTap,
@@ -114,11 +119,18 @@ class _AppCard extends StatelessWidget {
                 Container(
                   width: 48,
                   height: 48,
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: c.primary.withOpacity(0.12),
+                    color: c.surfaceVariant,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(icon, color: c.primary),
+                  child: logoAsset != null
+                      ? Image.asset(
+                          logoAsset!,
+                          errorBuilder: (_, __, ___) =>
+                              Icon(icon, color: c.primary),
+                        )
+                      : Icon(icon, color: c.primary),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
