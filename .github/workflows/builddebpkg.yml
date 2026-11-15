@@ -1,0 +1,42 @@
+name: Build Linux DEB Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-deb-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-deb:
+    name: Build DEB Package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux Deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev libjsoncpp-dev
+      - name: Create Fake file_selector_linux Package
+        run: |
+          mkdir -p fake_file_selector_linux/lib
+          cat > fake_file_selector_linux/pubspec.yaml << 'EOF'
+          name: file_selector_linux
+          description: Fake file_selector_linux for Linux build
+          version: 0.9.3+2
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+            flutter: '>=3.0.0'
+          dependencies:
+            flutter:
+              sdk: flutter
+            file
