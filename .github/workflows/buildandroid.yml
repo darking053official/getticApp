@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Android APK Derle
 
 on:
   workflow_dispatch:
@@ -7,40 +7,47 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-android-${{ github.ref }}
+  group: android-derle-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-android:
-    name: Build Android APK
+  android-derle:
+    name: Android APK Derle
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.2'
           channel: 'stable'
           cache: true
 
-      - name: Setup Android
+      - name: Android projesini hazırla
         run: |
           flutter create . --project-name gettic --org com.gettic --platforms=android
 
+          # Uygulama kimliği
           sed -i 's/applicationId ".*"/applicationId "gettic.by.darking053"/' android/app/build.gradle || true
+
+          # Derleme ve hedef SDK sürümleri
           sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/' android/app/build.gradle || true
           sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/' android/app/build.gradle || true
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle || true
           sed -i 's/minSdkVersion [0-9]*/minSdkVersion 24/' android/app/build.gradle || true
+
+          # Kotlin sürümü
           sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.23"/' android/settings.gradle || true
 
+          # Gradle sarmalayıcı sürümü
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-bin.zip|' android/gradle/wrapper/gradle-wrapper.properties || true
 
+          # Android Gradle Eklentisi sürümü
           if [ -f android/build.gradle ]; then
             sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.2/" android/build.gradle || true
           fi
@@ -48,29 +55,19 @@ jobs:
             sed -i 's/id "com.android.application" version "[^"]*"/id "com.android.application" version "8.2.2"/' android/settings.gradle || true
           fi
 
+          # R8/D8 sürümünü sabitle (dexleme hatalarını önler)
           if ! grep -q "android.r8.version" android/gradle.properties; then
             echo "android.r8.version=8.3.37" >> android/gradle.properties
           fi
 
+          # Ad alanı (namespace) eksik olan eklentiler için otomatik atama
           if ! grep -q "subprojects {" android/build.gradle; then
-            cat >> android/build.gradle << 'EOF'
-
-subprojects {
-    afterEvaluate { project ->
-        if (project.hasProperty('android')) {
-            project.android {
-                if (namespace == null) {
-                    namespace project.group
-                }
-            }
-        }
-    }
-}
-EOF
+            printf '\nsubprojects {\n    afterEvaluate { project ->\n        if (project.hasProperty("android")) {\n            project.android {\n                if (namespace == null) {\n                    namespace project.group\n                }\n            }\n        }\n    }\n}\n' >> android/build.gradle
           fi
 
+          # Gerekli izinler
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          for perm in \
+          for izin in \
             "android.permission.INTERNET" \
             "android.permission.CAMERA" \
             "android.permission.RECORD_AUDIO" \
@@ -81,80 +78,41 @@ EOF
             "android.permission.POST_NOTIFICATIONS" \
             "android.permission.SCHEDULE_EXACT_ALARM" \
             "android.permission.USE_EXACT_ALARM"; do
-            if ! grep -q "$perm" "$MANIFEST"; then
-              sed -i "/<manifest /a \    <uses-permission android:name=\"$perm\" />" "$MANIFEST"
+            if ! grep -q "$izin" "$MANIFEST"; then
+              sed -i "/<manifest /a \    <uses-permission android:name=\"$izin\" />" "$MANIFEST"
             fi
           done
           if ! grep -q "android.permission.WRITE_EXTERNAL_STORAGE" "$MANIFEST"; then
             sed -i '/<manifest /a \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />' "$MANIFEST"
           fi
+
+          # Uygulama adı
           sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
+
+          # Varsayılan test dosyasını kaldır
           rm -f test/widget_test.dart
 
-      - name: Add screen share native code
+      - name: Ekran paylaşımı için yerel kod ekle
         run: |
           set -e
           KT_ROOT=android/app/src/main/kotlin
-          MAIN=$(find "$KT_ROOT" -name MainActivity.kt | head -n 1)
-          PKG=$(grep -m1 '^package ' "$MAIN" | awk '{print $2}')
-          DEST="$KT_ROOT/$(echo "$PKG" | tr '.' '/')"
-          mkdir -p "$DEST"
+          ANA_DOSYA=$(find "$KT_ROOT" -name MainActivity.kt | head -n 1)
+          PAKET=$(grep -m1 '^package ' "$ANA_DOSYA" | awk '{print $2}')
+          HEDEF="$KT_ROOT/$(echo "$PAKET" | tr '.' '/')"
+          mkdir -p "$HEDEF"
           grep -q "^class ScreenShareService " ci/android/ScreenShareService.kt || { echo "::error::ScreenShareService.kt eksik."; exit 1; }
           grep -q "^class MainActivity " ci/android/MainActivity.kt || { echo "::error::MainActivity.kt eksik."; exit 1; }
-          for f in ScreenShareService.kt MainActivity.kt; do
-            sed "s/^package .*/package $PKG/" "ci/android/$f" > "$DEST/$f"
+          for dosya in ScreenShareService.kt MainActivity.kt; do
+            sed "s/^package .*/package $PAKET/" "ci/android/$dosya" > "$HEDEF/$dosya"
           done
 
-      - name: Patch manifest and gradle
+      - name: Manifest ve Gradle dosyalarını düzenle
         run: |
-          python3 - << 'PY'
-          import re
+          # Python betiğini base64 ile gömüyoruz (YAML heredoc sorununu önler)
+          echo 'aW1wb3J0IHJlCgptID0gJ2FuZHJvaWQvYXBwL3NyYy9tYWluL0FuZHJvaWRNYW5pZmVzdC54bWwnCnMgPSBvcGVuKG0sIGVuY29kaW5nPSd1dGYtOCcpLnJlYWQoKQpmb3IgcCBpbiBbJ2FuZHJvaWQucGVybWlzc2lvbi5GT1JFR1JPVU5EX1NFUlZJQ0UnLCdhbmRyb2lkLnBlcm1pc3Npb24uRk9SRUdST1VORF9TRVJWSUNFX01FRElBX1BST0pFQ1RJT04nXToKICAgIGlmIHAgbm90IGluIHM6CiAgICAgICAgcyA9IHJlLnN1YihyJyhcbjxpbWFuaWZlc3RbXj5dKj4pJywgbGFtYmRhIG1tOiBtLmdyb3VwKDEpICsgJ1xuICAgIDx1c2VzLXBlcm1pc3Npb24gYW5kcm9pZDpuYW1lPSIlcyIgLz4nICUgcCwgcywgY291bnQ9MSkKaWYgJ1NjcmVlblNoYXJlU2VydmljZScgbm90IGluIHM6CiAgICBzZXJ2aWNlID0gKCcgICAgPHNlcnZpY2UgYW5kcm9pZDpuYW1lPSIuU2NyZWVuU2hhcmVTZXJ2aWNlIiBhbmRyb2lkOmZvcmVncm91bmRTZXJ2aWNlVHlwZT0ibWVkaWFQcm9qZWN0aW9uIiBhbmRyb2lkOmV4cG9ydGVkPSJmYWxzZSIgLz5cbicpCiAgICBzID0gcy5yZXBsYWNlKCc8L2FwcGxpY2F0aW9uPicsIHNlcnZpY2UgKyAnPC9hcHBsaWNhdGlvbj4nLCAxKQpvcGVuKG0sICd3JywgZW5jb2Rpbmc9J3V0Zi04Jykud3JpdGUocykKCmcgPSAnYW5kcm9pZC9hcHAvYnVpbGQuZ3JhZGxlJwp0ID0gb3BlbihnLCBlbmNvZGluZz0ndXRmLTgnKS5yZWFkKCkKCmRlcCA9ICcgICAgaW1wbGVtZW50YXRpb24gImFuZHJvaWR4LmNvcmU6Y29yZS1rdHg6MS4xMi4wIicKaWYgJ2FuZHJvaWR4LmNvcmU6Y29yZS1rdHgnIG5vdCBpbiB0OgogICAgaWYgcmUuc2VhcmNoKHInXmRlcGVuZGVuY2llcyBceycsIHQsIHJlLk0pOgogICAgICAgIHQgPSByZS5zdWIocidcbmRlcGVuZGVuY2llcyBceycsICdkZXBlbmRlbmNpZXMge1xuJyArIGRlcCwgdCwgY291bnQ9MSwgZmxhZ3M9cmUuTSkKICAgIGVsc2U6CiAgICAgICAgdCArPSAnXG5kZXBlbmRlbmNpZXMge1xuJyArIGRlcCArICdcbn1cbicKCmlmICdjb3JlTGlicmFyeURlc3VnYXJpbmdFbmFibGVkJyBub3QgaW4gdDoKICAgIHQgPSByZS5zdWIocicoY29tcGlsZU9wdGlvbnMgXHspJywgcidcMVxuICAgICAgICBjb3JlTGlicmFyeURlc3VnYXJpbmdFbmFibGVkIHRydWUnLCB0LCBjb3VudD0xKQppZiAnZGVzdWdhcl9qZGtfbGlicycgbm90IGluIHQ6CiAgICB0ID0gcmUuc3ViKHInXmRlcGVuZGVuY2llcyBceycsICdkZXBlbmRlbmNpZXMge1xuICAgIGNvcmVMaWJyYXJ5RGVzdWdhcmluZyAiY29tLmFuZHJvaWQudG9vbHM6ZGVzdWdhcl9qZGtfbGliczoyLjEuNCInLCB0LCBjb3VudD0xLCBmbGFncz1yZS5NKQplbHNlOgogICAgdCA9IHJlLnN1YihyJ2NvbVwuYW5kcm9pZFwudG9vbHM6ZGVzdWdhcl9qZGtfbGliczpbMC05Ll0rJywgJ2NvbS5hbmRyb2lkLnRvb2xzOmRlc3VnYXJfamRrX2xpYnM6Mi4xLjQnLCB0KQoKaWYgJ2NoZWNrUmVsZWFzZUJ1aWxkcycgbm90IGluIHQ6CiAgICB0ID0gcmUuc3ViKHInXmFuZHJvaWQgXHsnLCAnYW5kcm9pZCB7XG4gICAgbGludCB7XG4gICAgICAgIGNoZWNrUmVsZWFzZUJ1aWxkcyBmYWxzZVxuICAgICAgICBhYm9ydE9uRXJyb3IgZmFsc2VcbiAgICB9JywgdCwgY291bnQ9MSwgZmxhZ3M9cmUuTSkKCnJlbGVhc2VfYmxvY2tfbWF0Y2ggPSByZS5zZWFyY2gocicoYnVpbGRUeXBlc1xzKlx7W1xzXFNdKj9yZWxlYXNlXHMqXHspKFtcc1xTXSo/KShcblxzKlx9KScsIHQpCmlmIHJlbGVhc2VfYmxvY2tfbWF0Y2g6CiAgICBoZWFkLCBib2R5LCB0YWlsID0gcmVsZWFzZV9ibG9ja19tYXRjaC5ncm91cHMoKQogICAgYm9keSA9IHJlLnN1YihyJ21pbmlmeUVuYWJsZWRccysobXRydWV8ZmFsc2UpJywgJ21pbmlmeUVuYWJsZWQgZmFsc2UnLCBib2R5KSBpZiAnbWluaWZ5RW5hYmxlZCcgaW4gYm9keSBlbHNlICdcbiAgICAgICAgICAgIG1pbmlmeUVuYWJsZWQgZmFsc2UnICsgYm9keQogICAgYm9keSA9IHJlLnN1YihyJ3Nocmlua1Jlc291cmNlc1xzKyh0cnVlfGZhbHNlKScsICdzaHJpbmtSZXNvdXJjZXMgZmFsc2UnLCBib2R5KSBpZiAnc2hyaW5rUmVzb3VyY2VzJyBpbiBib2R5IGVsc2UgJ1xuICAgICAgICAgICAgc2hyaW5rUmVzb3VyY2VzIGZhbHNlJyArIGJvZHkKICAgIHQgPSB0WzpyZWxlYXNlX2Jsb2NrX21hdGNoLnN0YXJ0KCldICsgaGVhZCArIGJvZHkgKyB0YWlsICsgdFtyZWxlYXNlX2Jsb2NrX21hdGNoLmVuZCgpOl0KZWxzZToKICAgIHQgPSByZS5zdWIocicoYW5kcm9pZFxzKlx7W1xzXFNdKj8pKFxuXH0pJywKICAgICAgICBsYW1iZGEgbW06IG1tLmdyb3VwKDEpICsgJ1xuICAgIGJ1aWxkVHlwZXMge1xuICAgICAgICByZWxlYXNlIHtcbiAgICAgICAgICAgIG1pbmlmeUVuYWJsZWQgZmFsc2VcbiAgICAgICAgICAgIHNocmlua1Jlc291cmNlcyBmYWxzZVxuICAgICAgICB9XG4gICAgfVxuJyArIG1tLmdyb3VwKDIpLAogICAgICAgIHQsIGNvdW50PTEpCgpvcGVuKGcsICd3JywgZW5jb2Rpbmc9J3V0Zi04Jykud3JpdGUodCkKcHJpbnQoJ0dyYWRsZSBnw7xuY2VsbGVuZGkuJykK' | base64 -d > /tmp/gradle_duzenle.py
+          python3 /tmp/gradle_duzenle.py
 
-          m = 'android/app/src/main/AndroidManifest.xml'
-          s = open(m, encoding='utf-8').read()
-          for p in ['android.permission.FOREGROUND_SERVICE','android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION']:
-              if p not in s:
-                  s = re.sub(r'(<manifest[^>]*>)', lambda mm: mm.group(1) + '\n    <uses-permission android:name="%s" />' % p, s, count=1)
-          if 'ScreenShareService' not in s:
-              service = ('    <service android:name=".ScreenShareService" android:foregroundServiceType="mediaProjection" android:exported="false" />\n')
-              s = s.replace('</application>', service + '</application>', 1)
-          open(m, 'w', encoding='utf-8').write(s)
-
-          g = 'android/app/build.gradle'
-          t = open(g, encoding='utf-8').read()
-
-          dep = '    implementation "androidx.core:core-ktx:1.12.0"'
-          if 'androidx.core:core-ktx' not in t:
-              if re.search(r'^dependencies \{', t, re.M):
-                  t = re.sub(r'^dependencies \{', 'dependencies {\n' + dep, t, count=1, flags=re.M)
-              else:
-                  t += '\ndependencies {\n' + dep + '\n}\n'
-
-          if 'coreLibraryDesugaringEnabled' not in t:
-              t = re.sub(r'(compileOptions \{)', r'\1\n        coreLibraryDesugaringEnabled true', t, count=1)
-          if 'desugar_jdk_libs' not in t:
-              t = re.sub(r'^dependencies \{', 'dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"', t, count=1, flags=re.M)
-          else:
-              t = re.sub(r'com\.android\.tools:desugar_jdk_libs:[0-9.]+', 'com.android.tools:desugar_jdk_libs:2.1.4', t)
-
-          if 'checkReleaseBuilds' not in t:
-              t = re.sub(r'^android \{', 'android {\n    lint {\n        checkReleaseBuilds false\n        abortOnError false\n    }', t, count=1, flags=re.M)
-
-          release_block_match = re.search(r'(buildTypes\s*\{[\s\S]*?release\s*\{)([\s\S]*?)(\n\s*\})', t)
-          if release_block_match:
-              head, body, tail = release_block_match.groups()
-              body = re.sub(r'minifyEnabled\s+(true|false)', 'minifyEnabled false', body) if 'minifyEnabled' in body else '\n            minifyEnabled false' + body
-              body = re.sub(r'shrinkResources\s+(true|false)', 'shrinkResources false', body) if 'shrinkResources' in body else '\n            shrinkResources false' + body
-              t = t[:release_block_match.start()] + head + body + tail + t[release_block_match.end():]
-          else:
-              t = re.sub(r'(android\s*\{[\s\S]*?)(\n\})',
-                  lambda mm: mm.group(1) + '\n    buildTypes {\n        release {\n            minifyEnabled false\n            shrinkResources false\n        }\n    }\n}' + mm.group(2),
-                  t, count=1)
-
-          open(g, 'w', encoding='utf-8').write(t)
-          PY
-
-      - name: Configure release signing (optional)
+      - name: Sürüm imzalamayı yapılandır (isteğe bağlı)
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -162,54 +120,40 @@ EOF
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::warning::KEYSTORE_BASE64 tanımlı değil."
+            echo "::warning::KEYSTORE_BASE64 tanımlı değil, APK hata ayıklama anahtarıyla imzalanacak."
             exit 0
           fi
           echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
-          cat > android/key.properties << EOF
-          storePassword=$KEYSTORE_PASSWORD
-          keyPassword=$KEY_PASSWORD
-          keyAlias=$KEY_ALIAS
-          storeFile=upload-keystore.jks
-          EOF
-          python3 - << 'PY'
-          import re
-          p = 'android/app/build.gradle'
-          s = open(p, encoding='utf-8').read()
-          if 'keystoreProperties' not in s:
-              props = ("def keystoreProperties = new Properties()\n"
-                       "def keystorePropertiesFile = rootProject.file('key.properties')\n"
-                       "if (keystorePropertiesFile.exists()) {\n"
-                       "    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n"
-                       "}\n\n")
-              s, n1 = re.subn(r'^android \{', lambda m: props + m.group(0), s, count=1, flags=re.M)
-              signing = ("    signingConfigs {\n        release {\n"
-                         "            keyAlias keystoreProperties['keyAlias']\n"
-                         "            keyPassword keystoreProperties['keyPassword']\n"
-                         "            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null\n"
-                         "            storePassword keystoreProperties['storePassword']\n"
-                         "        }\n    }\n\n")
-              s, n2 = re.subn(r'^    buildTypes \{', lambda m: signing + m.group(0), s, count=1, flags=re.M)
-              assert n1 == 1 and n2 == 1
-              assert 'signingConfig signingConfigs.debug' in s
-              s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
-              open(p, 'w', encoding='utf-8').write(s)
-          PY
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' "$KEYSTORE_PASSWORD" "$KEY_PASSWORD" "$KEY_ALIAS" > android/key.properties
+          echo 'aW1wb3J0IHJlCnAgPSAnYW5kcm9pZC9hcHAvYnVpbGQuZ3JhZGxlJwpzID0gb3BlbihwLCBlbmNvZGluZz0ndXRmLTgnKS5yZWFkKCkKaWYgJ2tleXN0b3JlUHJvcGVydGllcycgbm90IGluIHM6CiAgICBwcm9wcyA9ICgiZGVmIGtleXN0b3JlUHJvcGVydGllcyA9IG5ldyBQcm9wZXJ0aWVzKClcbiIKICAgICAgICAgICAgICJkZWYga2V5c3RvcmVQcm9wZXJ0aWVzRmlsZSA9IHJvb3RQcm9qZWN0LmZpbGUoJ2tleS5wcm9wZXJ0aWVzJylcbiIKICAgICAgICAgICAgICJpZiAoa2V5c3RvcmVQcm9wZXJ0aWVzRmlsZS5leGlzdHMoKSkge1xuIgogICAgICAgICAgICAgIiAgICBrZXlzdG9yZVByb3BlcnRpZXMubG9hZChuZXcgRmlsZUlucHV0U3RyZWFtKGtleXN0b3JlUHJvcGVydGllc0ZpbGUpKVxuIgogICAgICAgICAgICAgIn1cblxuIikKICAgIHMsIG4xID0gcmUuc3VibihyJ15hbmRyb2lkIFx7JywgbGFtYmRhIG06IHByb3BzICsgbS5ncm91cCgwKSwgcywgY291bnQ9MSwgZmxhZ3M9cmUuTSkKICAgIHNpZ25pbmcgPSAoIiAgICBzaWduaW5nQ29uZmlncyB7XG4gICAgICAgIHJlbGVhc2Uge1xuIgogICAgICAgICAgICAgICAiICAgICAgICAgICAga2V5QWxpYXMga2V5c3RvcmVQcm9wZXJ0aWVzWydrZXlBbGlhcyddXG4iCiAgICAgICAgICAgICAgICIgICAgICAgICAgICBrZXlQYXNzd29yZCBrZXlzdG9yZVByb3BlcnRpZXNbJ2tleVBhc3N3b3JkJ11cbiIKICAgICAgICAgICAgICAgIiAgICAgICAgICAgIHN0b3JlRmlsZSBrZXlzdG9yZVByb3BlcnRpZXNbJ3N0b3JlRmlsZSddID8gZmlsZShrZXlzdG9yZVByb3BlcnRpZXNbJ3N0b3JlRmlsZSddKSA6IG51bGxcbiIKICAgICAgICAgICAgICAgIiAgICAgICAgICAgIHN0b3JlUGFzc3dvcmQga2V5c3RvcmVQcm9wZXJ0aWVzWydzdG9yZVBhc3N3b3JkJ11cbiIKICAgICAgICAgICAgICAgIiAgICAgICAgfVxuICAgIH1cblxuIikKICAgIHMsIG4yID0gcmUuc3VibihyJ14gICAgYnVpbGRUeXBlcyBceycsIGxhbWJkYSBtOiBzaWduaW5nICsgbS5ncm91cCgwKSwgcywgY291bnQ9MSwgZmxhZ3M9cmUuTSkKICAgIGFzc2VydCBuMSA9PSAxIGFuZCBuMiA9PSAxCiAgICBhc3NlcnQgJ3NpZ25pbmdDb25maWcgc2lnbmluZ0NvbmZpZ3MuZGVidWcnIGluIHMKICAgIHMgPSBzLnJlcGxhY2UoJ3NpZ25pbmdDb25maWcgc2lnbmluZ0NvbmZpZ3MuZGVidWcnLCAnc2lnbmluZ0NvbmZpZyBzaWduaW5nQ29uZmlncy5yZWxlYXNlJykKICAgIG9wZW4ocCwgJ3cnLCBlbmNvZGluZz0ndXRmLTgnKS53cml0ZShzKQo=' | base64 -d > /tmp/imza_ayarla.py
+          python3 /tmp/imza_ayarla.py
 
-      - run: flutter pub get
-      - run: dart run flutter_launcher_icons
-      - run: dart run flutter_native_splash:create
-      - run: flutter build apk --release --split-per-abi
+      - name: Bağımlılıkları getir
+        run: flutter pub get
 
-      - uses: actions/upload-artifact@v4
+      - name: Uygulama simgelerini oluştur
+        run: dart run flutter_launcher_icons
+
+      - name: Açılış ekranını oluştur
+        run: dart run flutter_native_splash:create
+
+      - name: APK derle
+        run: flutter build apk --release --split-per-abi
+
+      - name: ARM64 APK yükle
+        uses: actions/upload-artifact@v4
         with:
           name: gettic-android-arm64
           path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-      - uses: actions/upload-artifact@v4
+
+      - name: ARMv7 APK yükle
+        uses: actions/upload-artifact@v4
         with:
           name: gettic-android-armv7
           path: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
-      - uses: actions/upload-artifact@v4
+
+      - name: x86_64 APK yükle
+        uses: actions/upload-artifact@v4
         with:
           name: gettic-android-x86_64
           path: build/app/outputs/flutter-apk/app-x86_64-release.apk
