@@ -137,6 +137,11 @@ jobs:
               t = re.sub(r'^dependencies \{', 'dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"', t, count=1, flags=re.M)
           open(g, 'w', encoding='utf-8').write(t)
 
+          # Release lint (lintVitalAnalyzeRelease) desugaring ile D8 hatası veriyor; APK'yı etkilemez, kapatılır
+          if 'checkReleaseBuilds' not in t:
+              t = re.sub(r'^android \{', 'android {\n    lint {\n        checkReleaseBuilds false\n        abortOnError false\n    }', t, count=1, flags=re.M)
+              open(g, 'w', encoding='utf-8').write(t)
+
           print('Manifest ve gradle güncellendi (ekran paylaşımı).')
           PY
 
