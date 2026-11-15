@@ -16,6 +16,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/theme.dart';
+import '../services/meet_service.dart';
 import '../services/screen_share_native.dart';
 
 class MeetCallPage extends StatefulWidget {
@@ -52,6 +53,15 @@ class _MeetCallPageState extends State<MeetCallPage> {
   RealtimeChannel? _signal;
   RealtimeChannel? _inviteWatch;
   Timer? _joinTimer;
+  Timer? _ringTimeout;
+  Timer? _durationTimer;
+  Timer? _iceTimer;
+  Timer? _offerRetry;
+  Timer? _watchdog;
+  Map<String, dynamic>? _lastOffer;
+  DateTime? _connectedAt;
+  bool _connected = false;
+  bool _speakerOn = true;
 
   final List<RTCIceCandidate> _pendingIce = [];
   bool _remoteSet = false;
@@ -73,11 +83,13 @@ class _MeetCallPageState extends State<MeetCallPage> {
   @override
   void initState() {
     super.initState();
+    MeetService.instance.setInCall(true);
     _start();
   }
 
   @override
   void dispose() {
+    MeetService.instance.setInCall(false);
     _cleanup();
     super.dispose();
   }
@@ -132,12 +144,38 @@ class _MeetCallPageState extends State<MeetCallPage> {
       });
     };
 
+    pc.onIceConnectionState = (state) {
+      if (!mounted || _ended || _connected) return;
+      final text = switch (state) {
+        RTCIceConnectionState.RTCIceConnectionStateChecking => 'Bağlantı deneniyor...',
+        RTCIceConnectionState.RTCIceConnectionStateConnected => 'Bağlanıyor...',
+        RTCIceConnectionState.RTCIceConnectionStateFailed => 'Ağ bağlantısı kurulamadı',
+        _ => null,
+      };
+      if (text != null) setState(() => _status = text);
+    };
+
     pc.onConnectionState = (state) {
-      if (!mounted) return;
-      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-        setState(() => _status = 'Bağlandı');
-      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
-        _fail('Bağlantı kurulamadı (ağ engeli olabilir)');
+      if (!mounted || _ended) return;
+      switch (state) {
+        case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
+          _onConnected();
+          break;
+        case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
+          setState(() => _status = 'Bağlantı zayıfladı, yeniden deneniyor...');
+          // Arayan taraf 5 sn içinde toparlanmazsa ICE'ı yeniden kurar
+          _iceTimer?.cancel();
+          _iceTimer = Timer(const Duration(seconds: 5), () {
+            if (!_connected && widget.isCaller && !_ended) {
+              _renegotiate(iceRestart: true);
+            }
+          });
+          break;
+        case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
+          _fail('Bağlantı kurulamadı (ağ engeli olabilir)');
+          break;
+        default:
+          break;
       }
     };
 
@@ -169,7 +207,23 @@ class _MeetCallPageState extends State<MeetCallPage> {
         )
         .subscribe();
 
-    if (mounted) setState(() => _status = 'Bağlanılıyor...');
+    // Arayan: alıcı belli bir süre içinde açmazsa çağrıyı iptal et
+    if (widget.isCaller) {
+      _ringTimeout = Timer(MeetService.ringDuration, () {
+        if (!_connected && !_ended) {
+          MeetService.instance.markStatus(widget.callId, 'cancelled');
+          _fail('Yanıt yok');
+        }
+      });
+    }
+
+    _watchdog = Timer(const Duration(seconds: 25), () {
+      if (!_connected && !_ended) {
+        _fail('Bağlanamadı. İki cihaz farklı ağlarda olabilir (ağ P2P bağlantısını engelliyor olabilir).');
+      }
+    });
+
+    if (mounted) setState(() => _status = widget.isCaller ? 'Aranıyor...' : 'Bağlanılıyor...');
   }
 
   void _onSubscribed() {
@@ -202,6 +256,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
       _joinTimer?.cancel();
       await _handleOffer(p);
     } else if (type == 'answer') {
+      _offerRetry?.cancel();
       await _pc?.setRemoteDescription(
           RTCSessionDescription(p['sdp'] as String, p['sdpType'] as String));
       await _markRemoteSet();
@@ -241,7 +296,15 @@ class _MeetCallPageState extends State<MeetCallPage> {
     if (pc == null) return;
     final offer = await pc.createOffer({});
     await pc.setLocalDescription(offer);
-    _send({'type': 'offer', 'sdp': offer.sdp, 'sdpType': offer.type});
+    _lastOffer = {'type': 'offer', 'sdp': offer.sdp, 'sdpType': offer.type};
+    _send(_lastOffer!);
+    // Cevap gelene kadar her 3 saniyede bir tekrar gönder
+    _offerRetry?.cancel();
+    _offerRetry = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!_remoteSet && !_connected && !_ended && _lastOffer != null) {
+        _send(_lastOffer!);
+      }
+    });
   }
 
   Future<void> _handleOffer(Map<String, dynamic> p) async {
@@ -357,10 +420,48 @@ class _MeetCallPageState extends State<MeetCallPage> {
   }
 
   /// Ekran paylaşımı eklenince/çıkarılınca SDP yeniden anlaşması (ayrı mesaj tipleriyle)
-  Future<void> _renegotiate() async {
+  void _onConnected() {
+    _connected = true;
+    _watchdog?.cancel();
+    _offerRetry?.cancel();
+    _ringTimeout?.cancel();
+    _iceTimer?.cancel();
+    _connectedAt ??= DateTime.now();
+    _durationTimer?.cancel();
+    _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+    if (mounted) setState(() {});
+  }
+
+  String get _statusText {
+    if (!_connected) return _status;
+    final d = DateTime.now().difference(_connectedAt ?? DateTime.now());
+    final mm = d.inMinutes.toString().padLeft(2, '0');
+    final ss = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return 'Bağlandı · $mm:$ss';
+  }
+
+  Future<void> _toggleSpeaker() async {
+    _speakerOn = !_speakerOn;
+    try {
+      await Helper.setSpeakerphoneOn(_speakerOn);
+    } catch (_) {}
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _switchCamera() async {
+    final tracks = _localStream?.getVideoTracks() ?? <MediaStreamTrack>[];
+    if (tracks.isEmpty) return;
+    try {
+      await Helper.switchCamera(tracks.first);
+    } catch (_) {}
+  }
+
+  Future<void> _renegotiate({bool iceRestart = false}) async {
     final pc = _pc;
     if (pc == null) return;
-    final offer = await pc.createOffer({});
+    final offer = await pc.createOffer({'iceRestart': iceRestart});
     await pc.setLocalDescription(offer);
     _send({'type': 'renego-offer', 'sdp': offer.sdp, 'sdpType': offer.type});
   }
@@ -400,7 +501,12 @@ class _MeetCallPageState extends State<MeetCallPage> {
 
   Future<void> _cleanup() async {
     _ended = true;
+    _offerRetry?.cancel();
+    _watchdog?.cancel();
     _joinTimer?.cancel();
+    _ringTimeout?.cancel();
+    _durationTimer?.cancel();
+    _iceTimer?.cancel();
     final sig = _signal;
     if (sig != null) await _sb.removeChannel(sig);
     final inv = _inviteWatch;
@@ -454,7 +560,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
                               style: const TextStyle(
                                   color: Colors.white, fontSize: 18)),
                           const SizedBox(height: 6),
-                          Text(_status,
+                          Text(_statusText,
                               style: const TextStyle(color: Colors.white70)),
                         ],
                       ),
@@ -493,6 +599,22 @@ class _MeetCallPageState extends State<MeetCallPage> {
                       color: _cameraOff ? Colors.white24 : Colors.white12,
                     ),
                   const SizedBox(width: 18),
+                  if (Platform.isAndroid) ...[
+                    _circle(
+                      icon: _speakerOn ? Icons.volume_up : Icons.hearing,
+                      onTap: _toggleSpeaker,
+                      color: Colors.white12,
+                    ),
+                    const SizedBox(width: 18),
+                  ],
+                  if (widget.video && Platform.isAndroid) ...[
+                    _circle(
+                      icon: Icons.cameraswitch,
+                      onTap: _switchCamera,
+                      color: Colors.white12,
+                    ),
+                    const SizedBox(width: 18),
+                  ],
                   if (_screenShareSupported) ...[
                     _circle(
                       icon: _sharing ? Icons.stop_screen_share : Icons.screen_share,
