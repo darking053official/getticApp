@@ -10,6 +10,7 @@
 
 import 'dart:async';
 
+import 'package:cryptography_flutter/cryptography_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -36,6 +37,9 @@ const String oneSignalAppId = "87e2dd8a-b811-49f7-b637-589f3a74d6fe";
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Parola türetme işlemini yerel kripto kütüphanesine bağla (çok daha hızlı)
+  FlutterCryptography.enable();
 
   await initializeDateFormatting('tr_TR', null);
 
