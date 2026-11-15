@@ -86,6 +86,9 @@ jobs:
           PKG=$(grep -m1 '^package ' "$MAIN" | awk '{print $2}')
           DEST="$KT_ROOT/$(echo "$PKG" | tr '.' '/')"
           mkdir -p "$DEST"
+          # Dosya içerikleri doğrula (yanlış kopyalanmış dosyayı erken yakala)
+          grep -q "^class ScreenShareService " ci/android/ScreenShareService.kt || { echo "::error::ci/android/ScreenShareService.kt içinde 'class ScreenShareService' yok. Dosyayı doğru içerikle güncelleyin."; exit 1; }
+          grep -q "^class MainActivity " ci/android/MainActivity.kt || { echo "::error::ci/android/MainActivity.kt içinde 'class MainActivity' yok. Dosyayı doğru içerikle güncelleyin."; exit 1; }
           for f in ScreenShareService.kt MainActivity.kt; do
             sed "s/^package .*/package $PKG/" "ci/android/$f" > "$DEST/$f"
           done
@@ -200,7 +203,7 @@ jobs:
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: dart run flutter_native_splash:create
-      - run: flutter build apk --release --split-per-abi
+      - run: flutter build apk --release --split-per-abi --no-shrink
 
       # Dosyanın bu repodaki hangi commit'ten üretildiğini kanıtlar.
       # Özel (private) repoda desteklenmeyebilir; derlemeyi bozmaz.
