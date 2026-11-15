@@ -1,14 +1,9 @@
 // ============================================================
-// ci/android/MainActivity.kt
-// Şablon dosyası. Workflow bunu okuyup package satırını
-// gettic.by.darking053 olarak değiştirir ve
-// android/app/src/main/kotlin/gettic/by/darking053/ altına yazar.
-//
-// Flutter tarafından "gettic/screen_share" kanalı üzerinden
-// "start" / "stop" komutlarını alır ve ScreenShareService'i
-// başlatır / durdurur.
+// android/app/src/main/kotlin/<paket>/MainActivity.kt
+// (.txt olarak verildi. Mevcut MainActivity'niz varsa bu sınıfı
+//  onunla birleştirin: configureFlutterEngine içindeki kanal kaydı yeterli.)
 // ============================================================
-package gettic.by.darking053
+package com.gettic.gettic
 
 import android.content.Intent
 import android.os.Build
