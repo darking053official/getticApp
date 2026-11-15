@@ -40,21 +40,31 @@ jobs:
         run: |
           flutter create . --project-name gettic --org com.gettic --platforms=android
 
-          # applicationId ve Kotlin package = gettic.by.darking053
+          # Android SDK 36 (cryptography_flutter için)
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null 2>&1 || true
+
           NEW_PKG="gettic.by.darking053"
           NEW_DIR="android/app/src/main/kotlin/$(echo "$NEW_PKG" | tr '.' '/')"
 
           sed -i "s/applicationId \".*\"/applicationId \"$NEW_PKG\"/" android/app/build.gradle || true
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
           sed -i 's/minSdkVersion [0-9]*/minSdkVersion 23/' android/app/build.gradle || true
+
+          # compileSdk / targetSdk 36
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' android/app/build.gradle || true
+          sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 36/' android/app/build.gradle || true
+          sed -i 's/compileSdk flutter.compileSdkVersion/compileSdk 36/' android/app/build.gradle || true
+          sed -i 's/compileSdk [0-9]*/compileSdk 36/' android/app/build.gradle || true
+          sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 36/' android/app/build.gradle || true
+          sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 36/' android/app/build.gradle || true
+
           sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.23"/' android/settings.gradle || true
 
-          # flutter create'in ürettiği MainActivity.kt'yi yeni paket altına taşı
           OLD_MAIN=$(find android/app/src/main/kotlin -name MainActivity.kt | head -n 1)
           if [ -n "$OLD_MAIN" ]; then
             mkdir -p "$NEW_DIR"
             sed "s/^package .*/package $NEW_PKG/" "$OLD_MAIN" > "$NEW_DIR/MainActivity.kt"
-            # Eski paket dizinini temizle
             OLD_DIR=$(dirname "$OLD_MAIN")
             rm -rf "$OLD_DIR"
           fi
@@ -86,7 +96,6 @@ jobs:
           sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
           rm -f test/widget_test.dart
 
-      # Ekran paylaşımı native kod (template'lerden, paket otomatik algılanır)
       - name: Add screen share native code
         run: |
           set -e
