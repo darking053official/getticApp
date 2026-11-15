@@ -25,6 +25,7 @@ import 'core/theme.dart';
 import 'pages/apps.dart';
 import 'pages/auth_page.dart';
 import 'services/cloud_vaults.dart';
+import 'services/meet_service.dart';
 
 final authStateProvider = StreamProvider<AuthState>((ref) {
   return Supabase.instance.client.auth.onAuthStateChange;
@@ -106,6 +107,7 @@ class GetticApp extends StatelessWidget {
       builder: (context, _) {
         return MaterialApp(
           title: AppConstants.appName,
+          navigatorKey: appNavigatorKey,
           debugShowCheckedModeBanner: false,
           theme: AppTheme.light,
           darkTheme: AppTheme.dark,
@@ -177,6 +179,11 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
   void initState() {
     super.initState();
 
+    // Uygulama zaten oturumluysa gelen çağrı dinlemesini hemen başlat
+    if (Supabase.instance.client.auth.currentUser != null) {
+      MeetService.instance.startListening();
+    }
+
     _authSubscription =
         Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       final event = data.event;
@@ -185,9 +192,11 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
       if (event == AuthChangeEvent.signedIn && userId != null) {
         OneSignal.login(userId);
         AppState().setCurrentUserId(userId);
+        MeetService.instance.startListening();
       } else if (event == AuthChangeEvent.signedOut) {
         OneSignal.logout();
         AppState().reset();
+        MeetService.instance.stopListening();
         CloudVaults.lockAll();
       }
     });
