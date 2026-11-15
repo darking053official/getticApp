@@ -60,11 +60,6 @@ jobs:
             echo "android.r8.version=8.3.37" >> android/gradle.properties
           fi
 
-          # Ad alanı (namespace) eksik olan eklentiler için otomatik atama
-          if ! grep -q "subprojects {" android/build.gradle; then
-            printf '\nsubprojects {\n    afterEvaluate { project ->\n        if (project.hasProperty("android")) {\n            project.android {\n                if (namespace == null) {\n                    namespace project.group\n                }\n            }\n        }\n    }\n}\n' >> android/build.gradle
-          fi
-
           # Gerekli izinler
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           for izin in \
@@ -91,6 +86,29 @@ jobs:
 
           # Varsayılan test dosyasını kaldır
           rm -f test/widget_test.dart
+
+      # ------------------------------------------------------------
+      # Eklentilerde eksik "namespace" (AGP 8 zorunlu) düzeltmesi.
+      # Koşulsuz eklenir. Değer eklentinin AndroidManifest paket adından alınır.
+      # ------------------------------------------------------------
+      - name: Eklenti namespace'lerini düzelt
+        run: |
+          cat >> android/build.gradle << 'EOF'
+
+          subprojects {
+              afterEvaluate { project ->
+                  if (project.hasProperty('android') && project.android.namespace == null) {
+                      def ns = 'com.gettic.plugins.' + project.name.replaceAll('[^A-Za-z0-9]', '_')
+                      def manifest = new File(project.projectDir, 'src/main/AndroidManifest.xml')
+                      if (manifest.exists()) {
+                          def m = (manifest.text =~ /package="([^"]+)"/)
+                          if (m.find()) { ns = m.group(1) }
+                      }
+                      project.android.namespace = ns
+                  }
+              }
+          }
+          EOF
 
       - name: Ekran paylaşımı için yerel kod ekle
         run: |
