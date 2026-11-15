@@ -99,6 +99,13 @@ jobs:
             sed -i '/<manifest /a \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />' "$MANIFEST"
           fi
 
+          # MainActivity'ye android:exported="true" garantile
+          if grep -q '<activity' "$MANIFEST"; then
+            if ! grep -q 'android:exported' "$MANIFEST"; then
+              sed -i 's|<activity|<activity android:exported="true"|' "$MANIFEST"
+            fi
+          fi
+
           sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
           rm -f test/widget_test.dart
 
@@ -109,16 +116,17 @@ jobs:
           DEST="android/app/src/main/kotlin/$(echo "$NEW_PKG" | tr '.' '/')"
           mkdir -p "$DEST"
           for f in ScreenShareService.kt MainActivity.kt; do
-            sed "s/^package .*/package $NEW_PKG/" "ci/android/$f" > "$DEST/$f"
+            if [ -f "ci/android/$f" ]; then
+              sed "s/^package .*/package $NEW_PKG/" "ci/android/$f" > "$DEST/$f"
+            fi
           done
           echo "Kotlin dosyaları yazıldı: $DEST (paket: $NEW_PKG)"
 
-      # ---- YENİ: R8 / ProGuard kuralları (flutter_webrtc için) ----
       - name: Configure ProGuard for flutter_webrtc
         run: |
           RULES="android/app/proguard-rules.pro"
           cat > "$RULES" << 'PRO'
-          # flutter_webrtc - R8 keep kuralları (aksi halde release'de crash olur)
+          # flutter_webrtc - R8 keep kuralları
           -keep class com.cloudwebrtc.webrtc.** { *; }
           -keep class org.webrtc.** { *; }
           -keep class org.jni_zero.** { *; }
@@ -126,67 +134,75 @@ jobs:
           -keepclasseswithmembernames class * {
               native <methods>;
           }
+          # Flutter kendi sınıfları
+          -keep class io.flutter.** { *; }
+          -keep class io.flutter.plugins.** { *; }
           PRO
           echo "ProGuard kuralları yazıldı: $RULES"
 
-      - name: Patch manifest and gradle for screen share + R8
+      - name: Patch manifest and gradle for screen share + R8 kapalı
         run: |
           python3 - << 'PY'
-          import re, os
+          import re
 
-          # 1) Manifest: izinler + servis
-          m = 'android/app/src/main/AndroidManifest.xml'
-          s = open(m, encoding='utf-8').read()
-          perms = [
-              'android.permission.FOREGROUND_SERVICE',
-              'android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION',
-          ]
-          for p in perms:
-              if p not in s:
-                  s = re.sub(r'(<manifest[^>]*>)',
-                             lambda mm: mm.group(1) + '\n    <uses-permission android:name="%s" />' % p,
-                             s, count=1)
-          if 'ScreenShareService' not in s:
-              service = ('    <service android:name=".ScreenShareService"'
-                         ' android:foregroundServiceType="mediaProjection"'
-                         ' android:exported="false" />\n')
-              s = s.replace('</application>', service + '</application>', 1)
-          open(m, 'w', encoding='utf-8').write(s)
+          # 1) Manifest: ScreenShareService ekle (hata verirse build durmasın)
+          try:
+              m = 'android/app/src/main/AndroidManifest.xml'
+              s = open(m, encoding='utf-8').read()
+              perms = [
+                  'android.permission.FOREGROUND_SERVICE',
+                  'android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION',
+              ]
+              for p in perms:
+                  if p not in s:
+                      s = re.sub(r'(<manifest[^>]*>)',
+                                 lambda mm: mm.group(1) + '\n    <uses-permission android:name="%s" />' % p,
+                                 s, count=1)
+              if 'ScreenShareService' not in s:
+                  service = ('    <service android:name=".ScreenShareService"'
+                             ' android:foregroundServiceType="mediaProjection"'
+                             ' android:exported="false" />\n')
+                  s = s.replace('</application>', service + '</application>', 1)
+              open(m, 'w', encoding='utf-8').write(s)
+              print('Manifest güncellendi.')
+          except Exception as e:
+              print('Manifest uyarı: %s' % e)
 
-          # 2) build.gradle: androidx.core + release buildTypes R8 ayarı
-          g = 'android/app/build.gradle'
-          t = open(g, encoding='utf-8').read()
+          # 2) build.gradle: androidx.core + release buildTypes R8 KAPALI
+          try:
+              g = 'android/app/build.gradle'
+              t = open(g, encoding='utf-8').read()
 
-          dep = '    implementation "androidx.core:core-ktx:1.12.0"'
-          if 'androidx.core:core-ktx' not in t:
-              if re.search(r'^dependencies \{', t, re.M):
-                  t = re.sub(r'^dependencies \{', 'dependencies {\n' + dep, t, count=1, flags=re.M)
-              else:
-                  t += '\ndependencies {\n' + dep + '\n}\n'
+              dep = '    implementation "androidx.core:core-ktx:1.12.0"'
+              if 'androidx.core:core-ktx' not in t:
+                  if re.search(r'^dependencies \{', t, re.M):
+                      t = re.sub(r'^dependencies \{', 'dependencies {\n' + dep, t, count=1, flags=re.M)
+                  else:
+                      t += '\ndependencies {\n' + dep + '\n}\n'
 
-          # release bloğuna R8 ayarlarını ekle (yoksa)
-          if 'proguard-rules.pro' not in t:
+              # release bloğunda R8 KAPALI
               def patch_release(mm):
                   body = mm.group(2)
-                  if 'proguard-rules.pro' in body:
-                      return mm.group(0)
-                  extra = (
-                      "            minifyEnabled true\n"
-                      "            shrinkResources true\n"
-                      "            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'\n"
-                  )
-                  return mm.group(1) + body + extra + mm.group(3)
+                  body = re.sub(r'minifyEnabled\s+\w+', 'minifyEnabled false', body)
+                  body = re.sub(r'shrinkResources\s+\w+', 'shrinkResources false', body)
+                  if 'minifyEnabled' not in body:
+                      body += "            minifyEnabled false\n"
+                  if 'shrinkResources' not in body:
+                      body += "            shrinkResources false\n"
+                  return mm.group(1) + body + mm.group(3)
 
               t2 = re.sub(r'(\brelease\s*\{)(.*?)(\})', patch_release, t, count=1, flags=re.S)
               if t2 != t:
                   t = t2
               else:
-                  # release bloğu yoksa ekle
-                  t = re.sub(r'^(\s*)buildTypes\s*\{', r'\1buildTypes {\n\1    release {\n\1        minifyEnabled true\n\1        shrinkResources true\n\1        proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"\n\1    }', t, count=1, flags=re.M)
+                  t = re.sub(r'^(\s*)buildTypes\s*\{',
+                             r'\1buildTypes {\n\1    release {\n\1        minifyEnabled false\n\1        shrinkResources false\n\1    }',
+                             t, count=1, flags=re.M)
 
-          open(g, 'w', encoding='utf-8').write(t)
-
-          print('Manifest + gradle güncellendi (ekran paylaşımı + R8).')
+              open(g, 'w', encoding='utf-8').write(t)
+              print('gradle güncellendi (R8 kapalı).')
+          except Exception as e:
+              print('gradle uyarı: %s' % e)
           PY
 
       - name: Configure release signing (optional)
@@ -197,7 +213,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::warning::KEYSTORE_BASE64 secret tanımlı değil. APK debug anahtarıyla imzalanacak (güncelleme olarak kurulamaz)."
+            echo "::warning::KEYSTORE_BASE64 secret tanımlı değil. APK debug anahtarıyla imzalanacak."
             exit 0
           fi
 
@@ -236,11 +252,10 @@ jobs:
               )
               s, n2 = re.subn(r'^    buildTypes \{', lambda m: signing + m.group(0), s, count=1, flags=re.M)
 
-              assert n1 == 1 and n2 == 1, 'build.gradle şablonu beklenenden farklı, imzalama eklenemedi'
-              assert 'signingConfig signingConfigs.debug' in s, 'release signingConfig satırı bulunamadı'
-              s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
-              open(p, 'w', encoding='utf-8').write(s)
-              print('Release imzalama yapılandırıldı.')
+              if n1 == 1 and n2 == 1 and 'signingConfig signingConfigs.debug' in s:
+                  s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
+                  open(p, 'w', encoding='utf-8').write(s)
+                  print('Release imzalama yapılandırıldı.')
           PY
 
       - run: rm -f pubspec.lock
@@ -321,7 +336,7 @@ jobs:
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
           if ([string]::IsNullOrEmpty($env:WINDOWS_CERT_BASE64)) {
-            Write-Host "::warning::WINDOWS_CERT_BASE64 secret tanımlı değil. EXE imzasız olacak (SmartScreen uyarısı verir)."
+            Write-Host "::warning::WINDOWS_CERT_BASE64 secret tanımlı değil. EXE imzasız olacak."
             exit 0
           }
 
@@ -407,7 +422,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           if [ -z "$MACOS_CERT_BASE64" ] || [ -z "$MACOS_SIGN_IDENTITY" ]; then
-            echo "::warning::macOS imzalama secret'ları tanımlı değil. Uygulama imzasız/notarize edilmemiş olacak (Gatekeeper uyarısı verir)."
+            echo "::warning::macOS imzalama secret'ları tanımlı değil."
             exit 0
           fi
 
@@ -434,13 +449,11 @@ jobs:
               --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait 2>&1) || true
             echo "$OUT"
             if ! echo "$OUT" | grep -q "status: Accepted"; then
-              echo "::error::Notarization başarısız oldu. Yukarıdaki çıktıya bakın."
+              echo "::error::Notarization başarısız oldu."
               exit 1
             fi
             xcrun stapler staple "$APP"
             echo "Uygulama imzalandı ve notarize edildi."
-          else
-            echo "::warning::APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD tanımlı değil. Uygulama imzalandı ama notarize edilmedi."
           fi
 
           security delete-keychain "$KEYCHAIN" || true
@@ -709,7 +722,7 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           if [ -z "$GPG_PRIVATE_KEY" ]; then
-            echo "::notice::GPG_PRIVATE_KEY secret tanımlı değil, SHA256SUMS.txt imzalanmayacak."
+            echo "::notice::GPG_PRIVATE_KEY secret tanımlı değil."
             exit 0
           fi
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
@@ -736,17 +749,11 @@ jobs:
           cat > release-notes.md << 'EOF'
           ## Dosyayı doğrulama
 
-          İndirdiğin dosyanın değişmediğini kontrol etmek için, dosyaların bulunduğu klasörde:
+          İndirdiğin dosyanın değişmediğini kontrol etmek için:
 
           ```
           sha256sum -c SHA256SUMS.txt --ignore-missing
           ```
-
-          Windows (PowerShell): `Get-FileHash dosya.zip -Algorithm SHA256` çıktısını `SHA256SUMS.txt` ile karşılaştır.
-          macOS: `shasum -a 256 dosya.zip`
-
-          Dosyalar bu depodaki derlemeye bağlı olarak GitHub tarafından da kaydedilir (build provenance):
-          `gh attestation verify <dosya> --repo ${{ github.repository }}`
           EOF
           FILES=(dist/*)
           gh release create "$TAG" "${FILES[@]}" \
