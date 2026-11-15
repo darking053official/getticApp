@@ -40,7 +40,6 @@ jobs:
         run: |
           flutter create . --project-name gettic --org com.gettic --platforms=android
 
-          # Android SDK 36 (cryptography_flutter için)
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null 2>&1 || true
 
@@ -51,7 +50,6 @@ jobs:
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
           sed -i 's/minSdkVersion [0-9]*/minSdkVersion 23/' android/app/build.gradle || true
 
-          # compileSdk / targetSdk 36
           sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' android/app/build.gradle || true
           sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 36/' android/app/build.gradle || true
           sed -i 's/compileSdk flutter.compileSdkVersion/compileSdk 36/' android/app/build.gradle || true
@@ -59,7 +57,6 @@ jobs:
           sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 36/' android/app/build.gradle || true
           sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 36/' android/app/build.gradle || true
 
-          # AAPT2'yi güncelle (compileSdk 36 android.jar uyumsuzluğu için)
           if ! grep -q "android.aapt2Version" android/gradle.properties; then
             echo "" >> android/gradle.properties
             echo "android.aapt2Version=8.6.1-11315950" >> android/gradle.properties
@@ -116,11 +113,28 @@ jobs:
           done
           echo "Kotlin dosyaları yazıldı: $DEST (paket: $NEW_PKG)"
 
-      - name: Patch manifest and gradle for screen share
+      # ---- YENİ: R8 / ProGuard kuralları (flutter_webrtc için) ----
+      - name: Configure ProGuard for flutter_webrtc
+        run: |
+          RULES="android/app/proguard-rules.pro"
+          cat > "$RULES" << 'PRO'
+          # flutter_webrtc - R8 keep kuralları (aksi halde release'de crash olur)
+          -keep class com.cloudwebrtc.webrtc.** { *; }
+          -keep class org.webrtc.** { *; }
+          -keep class org.jni_zero.** { *; }
+          -dontwarn org.jni_zero.JniZeroJni
+          -keepclasseswithmembernames class * {
+              native <methods>;
+          }
+          PRO
+          echo "ProGuard kuralları yazıldı: $RULES"
+
+      - name: Patch manifest and gradle for screen share + R8
         run: |
           python3 - << 'PY'
-          import re
+          import re, os
 
+          # 1) Manifest: izinler + servis
           m = 'android/app/src/main/AndroidManifest.xml'
           s = open(m, encoding='utf-8').read()
           perms = [
@@ -139,17 +153,40 @@ jobs:
               s = s.replace('</application>', service + '</application>', 1)
           open(m, 'w', encoding='utf-8').write(s)
 
+          # 2) build.gradle: androidx.core + release buildTypes R8 ayarı
           g = 'android/app/build.gradle'
           t = open(g, encoding='utf-8').read()
+
           dep = '    implementation "androidx.core:core-ktx:1.12.0"'
           if 'androidx.core:core-ktx' not in t:
               if re.search(r'^dependencies \{', t, re.M):
                   t = re.sub(r'^dependencies \{', 'dependencies {\n' + dep, t, count=1, flags=re.M)
               else:
                   t += '\ndependencies {\n' + dep + '\n}\n'
-              open(g, 'w', encoding='utf-8').write(t)
 
-          print('Manifest ve gradle güncellendi (ekran paylaşımı).')
+          # release bloğuna R8 ayarlarını ekle (yoksa)
+          if 'proguard-rules.pro' not in t:
+              def patch_release(mm):
+                  body = mm.group(2)
+                  if 'proguard-rules.pro' in body:
+                      return mm.group(0)
+                  extra = (
+                      "            minifyEnabled true\n"
+                      "            shrinkResources true\n"
+                      "            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'\n"
+                  )
+                  return mm.group(1) + body + extra + mm.group(3)
+
+              t2 = re.sub(r'(\brelease\s*\{)(.*?)(\})', patch_release, t, count=1, flags=re.S)
+              if t2 != t:
+                  t = t2
+              else:
+                  # release bloğu yoksa ekle
+                  t = re.sub(r'^(\s*)buildTypes\s*\{', r'\1buildTypes {\n\1    release {\n\1        minifyEnabled true\n\1        shrinkResources true\n\1        proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"\n\1    }', t, count=1, flags=re.M)
+
+          open(g, 'w', encoding='utf-8').write(t)
+
+          print('Manifest + gradle güncellendi (ekran paylaşımı + R8).')
           PY
 
       - name: Configure release signing (optional)
