@@ -90,6 +90,7 @@ flutter:
     - assets/main_logo.png
     - assets/getticnotebook_logo.png
     - assets/getticpass_logo.png
+    - assets/getticmeet_logo.png
     
 dependency_overrides:
   record: 5.1.0
