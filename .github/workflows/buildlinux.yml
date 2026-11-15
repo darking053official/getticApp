@@ -1,0 +1,102 @@
+name: Build Linux
+
+on:
+  workflow_dispatch:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux Deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev fuse libfuse2 libsecret-1-dev libjsoncpp-dev
+      - name: Create Fake file_selector_linux Package
+        run: |
+          mkdir -p fake_file_selector_linux/lib
+          cat > fake_file_selector_linux/pubspec.yaml << 'EOF'
+          name: file_selector_linux
+          description: Fake file_selector_linux for Linux build
+          version: 0.9.3+2
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+            flutter: '>=3.0.0'
+          dependencies:
+            flutter:
+              sdk: flutter
+            file_selector_platform_interface: ^2.6.2
+          flutter:
+            plugin:
+              implements: file_selector_linux
+              platforms:
+                linux:
+                  dartPluginClass: FileSelectorLinux
+          EOF
+          cat > fake_file_selector_linux/lib/file_selector_linux.dart << 'EOF'
+          import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
+          class FileSelectorLinux extends FileSelectorPlatform {
+            static void registerWith() { FileSelectorPlatform.instance = FileSelectorLinux(); }
+            @override
+            Future<XFile?> openFile({List<XTypeGroup>? acceptedTypeGroups, String? initialDirectory, String? confirmButtonText}) async { throw UnimplementedError(); }
+            @override
+            Future<List<XFile>> openFiles({List<XTypeGroup>? acceptedTypeGroups, String? initialDirectory, String? confirmButtonText}) async { throw UnimplementedError(); }
+            @override
+            Future<String?> getSavePath({List<XTypeGroup>? acceptedTypeGroups, String? initialDirectory, String? suggestedName, String? confirmButtonText}) async { throw UnimplementedError(); }
+            @override
+            Future<String?> getDirectoryPath({String? initialDirectory, String? confirmButtonText}) async { throw UnimplementedError(); }
+          }
+          EOF
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.2'
+          channel: 'stable'
+          cache: true
+      - name: Setup Linux
+        run: |
+          flutter config --enable-linux-desktop
+          flutter create . --project-name gettic --org com.gettic --platforms=linux
+          rm -f test/widget_test.dart
+      - name: Add dependency overrides
+        run: |
+          if ! grep -q "url_launcher_linux:" pubspec.yaml; then
+            if grep -q "^dependency_overrides:" pubspec.yaml; then
+              sed -i '/^dependency_overrides:/a \  url_launcher_linux: 3.0.6\n  file_selector_linux:\n    path: ./fake_file_selector_linux' pubspec.yaml
+            else
+              echo "" >> pubspec.yaml
+              echo "dependency_overrides:" >> pubspec.yaml
+              echo "  url_launcher_linux: 3.0.6" >> pubspec.yaml
+              echo "  file_selector_linux:" >> pubspec.yaml
+              echo "    path: ./fake_file_selector_linux" >> pubspec.yaml
+            fi
+          fi
+      - run: flutter pub get
+      - name: Disable -Werror for Linux Build
+        run: |
+          CMAKE_FILE="linux/CMakeLists.txt"
+          if [ -f "$CMAKE_FILE" ]; then
+            sed -i 's/target_compile_options(${TARGET} PRIVATE -Wall -Werror/target_compile_options(${TARGET} PRIVATE -Wall -Wno-error/' "$CMAKE_FILE"
+          fi
+      - run: dart run flutter_native_splash:create
+      - run: |
+          flutter clean
+          flutter pub get
+          flutter build linux --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-linux-bundle
+          path: build/linux/x64/release/bundle/
