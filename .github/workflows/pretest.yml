@@ -59,6 +59,12 @@ jobs:
           sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 36/' android/app/build.gradle || true
           sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 36/' android/app/build.gradle || true
 
+          # AAPT2'yi güncelle (compileSdk 36 android.jar uyumsuzluğu için)
+          if ! grep -q "android.aapt2Version" android/gradle.properties; then
+            echo "" >> android/gradle.properties
+            echo "android.aapt2Version=8.6.1-11315950" >> android/gradle.properties
+          fi
+
           sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.23"/' android/settings.gradle || true
 
           OLD_MAIN=$(find android/app/src/main/kotlin -name MainActivity.kt | head -n 1)
@@ -75,6 +81,9 @@ jobs:
             "android.permission.INTERNET" \
             "android.permission.CAMERA" \
             "android.permission.RECORD_AUDIO" \
+            "android.permission.MODIFY_AUDIO_SETTINGS" \
+            "android.permission.BLUETOOTH" \
+            "android.permission.BLUETOOTH_CONNECT" \
             "android.permission.READ_EXTERNAL_STORAGE" \
             "android.permission.READ_MEDIA_IMAGES" \
             "android.permission.READ_MEDIA_VIDEO" \
@@ -197,6 +206,7 @@ jobs:
               print('Release imzalama yapılandırıldı.')
           PY
 
+      - run: rm -f pubspec.lock
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: dart run flutter_native_splash:create
@@ -222,7 +232,7 @@ jobs:
           path: build/app/outputs/flutter-apk/app-x86_64-release.apk
 
   # ==========================================
-  # WINDOWS BUILD
+  # WINDOWS BUILD (değişmedi)
   # ==========================================
   build-windows:
     name: Build Windows EXE
@@ -308,7 +318,7 @@ jobs:
           path: gettic-windows.zip
 
   # ==========================================
-  # MACOS BUILD
+  # MACOS BUILD (değişmedi)
   # ==========================================
   build-macos:
     name: Build macOS
@@ -415,7 +425,7 @@ jobs:
           path: build/macos/Build/Products/Release/gettic-macos.zip
 
   # ==========================================
-  # LINUX BUILD
+  # LINUX BUILD (değişmedi)
   # ==========================================
   build-linux:
     name: Build Linux
@@ -628,7 +638,7 @@ jobs:
           path: gettic-linux-amd64.deb
 
   # ==========================================
-  # CHECKSUM + RELEASE
+  # CHECKSUM + RELEASE (değişmedi)
   # ==========================================
   release:
     name: Checksums and Release
