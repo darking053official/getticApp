@@ -1,0 +1,215 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.2'
+          channel: 'stable'
+          cache: true
+
+      - name: Setup Android
+        run: |
+          flutter create . --project-name gettic --org com.gettic --platforms=android
+
+          sed -i 's/applicationId ".*"/applicationId "gettic.by.darking053"/' android/app/build.gradle || true
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/' android/app/build.gradle || true
+          sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/' android/app/build.gradle || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle || true
+          sed -i 's/minSdkVersion [0-9]*/minSdkVersion 24/' android/app/build.gradle || true
+          sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.23"/' android/settings.gradle || true
+
+          sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-bin.zip|' android/gradle/wrapper/gradle-wrapper.properties || true
+
+          if [ -f android/build.gradle ]; then
+            sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.2.2/" android/build.gradle || true
+          fi
+          if [ -f android/settings.gradle ]; then
+            sed -i 's/id "com.android.application" version "[^"]*"/id "com.android.application" version "8.2.2"/' android/settings.gradle || true
+          fi
+
+          if ! grep -q "android.r8.version" android/gradle.properties; then
+            echo "android.r8.version=8.3.37" >> android/gradle.properties
+          fi
+
+          if ! grep -q "subprojects {" android/build.gradle; then
+            cat >> android/build.gradle << 'EOF'
+
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            project.android {
+                if (namespace == null) {
+                    namespace project.group
+                }
+            }
+        }
+    }
+}
+EOF
+          fi
+
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          for perm in \
+            "android.permission.INTERNET" \
+            "android.permission.CAMERA" \
+            "android.permission.RECORD_AUDIO" \
+            "android.permission.READ_EXTERNAL_STORAGE" \
+            "android.permission.READ_MEDIA_IMAGES" \
+            "android.permission.READ_MEDIA_VIDEO" \
+            "android.permission.READ_MEDIA_AUDIO" \
+            "android.permission.POST_NOTIFICATIONS" \
+            "android.permission.SCHEDULE_EXACT_ALARM" \
+            "android.permission.USE_EXACT_ALARM"; do
+            if ! grep -q "$perm" "$MANIFEST"; then
+              sed -i "/<manifest /a \    <uses-permission android:name=\"$perm\" />" "$MANIFEST"
+            fi
+          done
+          if ! grep -q "android.permission.WRITE_EXTERNAL_STORAGE" "$MANIFEST"; then
+            sed -i '/<manifest /a \    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />' "$MANIFEST"
+          fi
+          sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
+          rm -f test/widget_test.dart
+
+      - name: Add screen share native code
+        run: |
+          set -e
+          KT_ROOT=android/app/src/main/kotlin
+          MAIN=$(find "$KT_ROOT" -name MainActivity.kt | head -n 1)
+          PKG=$(grep -m1 '^package ' "$MAIN" | awk '{print $2}')
+          DEST="$KT_ROOT/$(echo "$PKG" | tr '.' '/')"
+          mkdir -p "$DEST"
+          grep -q "^class ScreenShareService " ci/android/ScreenShareService.kt || { echo "::error::ScreenShareService.kt eksik."; exit 1; }
+          grep -q "^class MainActivity " ci/android/MainActivity.kt || { echo "::error::MainActivity.kt eksik."; exit 1; }
+          for f in ScreenShareService.kt MainActivity.kt; do
+            sed "s/^package .*/package $PKG/" "ci/android/$f" > "$DEST/$f"
+          done
+
+      - name: Patch manifest and gradle
+        run: |
+          python3 - << 'PY'
+          import re
+
+          m = 'android/app/src/main/AndroidManifest.xml'
+          s = open(m, encoding='utf-8').read()
+          for p in ['android.permission.FOREGROUND_SERVICE','android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION']:
+              if p not in s:
+                  s = re.sub(r'(<manifest[^>]*>)', lambda mm: mm.group(1) + '\n    <uses-permission android:name="%s" />' % p, s, count=1)
+          if 'ScreenShareService' not in s:
+              service = ('    <service android:name=".ScreenShareService" android:foregroundServiceType="mediaProjection" android:exported="false" />\n')
+              s = s.replace('</application>', service + '</application>', 1)
+          open(m, 'w', encoding='utf-8').write(s)
+
+          g = 'android/app/build.gradle'
+          t = open(g, encoding='utf-8').read()
+
+          dep = '    implementation "androidx.core:core-ktx:1.12.0"'
+          if 'androidx.core:core-ktx' not in t:
+              if re.search(r'^dependencies \{', t, re.M):
+                  t = re.sub(r'^dependencies \{', 'dependencies {\n' + dep, t, count=1, flags=re.M)
+              else:
+                  t += '\ndependencies {\n' + dep + '\n}\n'
+
+          if 'coreLibraryDesugaringEnabled' not in t:
+              t = re.sub(r'(compileOptions \{)', r'\1\n        coreLibraryDesugaringEnabled true', t, count=1)
+          if 'desugar_jdk_libs' not in t:
+              t = re.sub(r'^dependencies \{', 'dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"', t, count=1, flags=re.M)
+          else:
+              t = re.sub(r'com\.android\.tools:desugar_jdk_libs:[0-9.]+', 'com.android.tools:desugar_jdk_libs:2.1.4', t)
+
+          if 'checkReleaseBuilds' not in t:
+              t = re.sub(r'^android \{', 'android {\n    lint {\n        checkReleaseBuilds false\n        abortOnError false\n    }', t, count=1, flags=re.M)
+
+          release_block_match = re.search(r'(buildTypes\s*\{[\s\S]*?release\s*\{)([\s\S]*?)(\n\s*\})', t)
+          if release_block_match:
+              head, body, tail = release_block_match.groups()
+              body = re.sub(r'minifyEnabled\s+(true|false)', 'minifyEnabled false', body) if 'minifyEnabled' in body else '\n            minifyEnabled false' + body
+              body = re.sub(r'shrinkResources\s+(true|false)', 'shrinkResources false', body) if 'shrinkResources' in body else '\n            shrinkResources false' + body
+              t = t[:release_block_match.start()] + head + body + tail + t[release_block_match.end():]
+          else:
+              t = re.sub(r'(android\s*\{[\s\S]*?)(\n\})',
+                  lambda mm: mm.group(1) + '\n    buildTypes {\n        release {\n            minifyEnabled false\n            shrinkResources false\n        }\n    }\n}' + mm.group(2),
+                  t, count=1)
+
+          open(g, 'w', encoding='utf-8').write(t)
+          PY
+
+      - name: Configure release signing (optional)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::KEYSTORE_BASE64 tanımlı değil."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          cat > android/key.properties << EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+          python3 - << 'PY'
+          import re
+          p = 'android/app/build.gradle'
+          s = open(p, encoding='utf-8').read()
+          if 'keystoreProperties' not in s:
+              props = ("def keystoreProperties = new Properties()\n"
+                       "def keystorePropertiesFile = rootProject.file('key.properties')\n"
+                       "if (keystorePropertiesFile.exists()) {\n"
+                       "    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n"
+                       "}\n\n")
+              s, n1 = re.subn(r'^android \{', lambda m: props + m.group(0), s, count=1, flags=re.M)
+              signing = ("    signingConfigs {\n        release {\n"
+                         "            keyAlias keystoreProperties['keyAlias']\n"
+                         "            keyPassword keystoreProperties['keyPassword']\n"
+                         "            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null\n"
+                         "            storePassword keystoreProperties['storePassword']\n"
+                         "        }\n    }\n\n")
+              s, n2 = re.subn(r'^    buildTypes \{', lambda m: signing + m.group(0), s, count=1, flags=re.M)
+              assert n1 == 1 and n2 == 1
+              assert 'signingConfig signingConfigs.debug' in s
+              s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
+              open(p, 'w', encoding='utf-8').write(s)
+          PY
+
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - run: dart run flutter_native_splash:create
+      - run: flutter build apk --release --split-per-abi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-android-arm64
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-android-armv7
+          path: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-android-x86_64
+          path: build/app/outputs/flutter-apk/app-x86_64-release.apk
