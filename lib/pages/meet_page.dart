@@ -9,12 +9,14 @@
 // ============================================================
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/theme.dart';
+import '../services/screen_share_native.dart';
 
 class MeetCallPage extends StatefulWidget {
   final String callId;
@@ -39,6 +41,11 @@ class MeetCallPage extends StatefulWidget {
 class _MeetCallPageState extends State<MeetCallPage> {
   final RTCVideoRenderer _localView = RTCVideoRenderer();
   final RTCVideoRenderer _remoteView = RTCVideoRenderer();
+  final RTCVideoRenderer _screenView = RTCVideoRenderer();
+  MediaStream? _screenStream;
+  RTCRtpSender? _screenSender;
+  bool _sharing = false;
+  bool _remoteSharing = false;
 
   MediaStream? _localStream;
   RTCPeerConnection? _pc;
@@ -81,6 +88,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   Future<void> _start() async {
     await _localView.initialize();
     await _remoteView.initialize();
+    await _screenView.initialize();
 
     try {
       _localStream = await navigator.mediaDevices.getUserMedia({
@@ -100,9 +108,19 @@ class _MeetCallPageState extends State<MeetCallPage> {
     }
 
     pc.onTrack = (event) {
-      if (event.streams.isNotEmpty && mounted) {
-        setState(() => _remoteView.srcObject = event.streams.first);
-      }
+      if (event.streams.isEmpty || !mounted) return;
+      final stream = event.streams.first;
+      // Karşı taraf ekran paylaşıyorsa ve bu, mevcut kamera akışından farklıysa ekran akışıdır
+      final isScreen = _remoteSharing &&
+          _remoteView.srcObject != null &&
+          _remoteView.srcObject!.id != stream.id;
+      setState(() {
+        if (isScreen) {
+          _screenView.srcObject = stream;
+        } else {
+          _remoteView.srcObject = stream;
+        }
+      });
     };
 
     pc.onIceCandidate = (c) {
@@ -198,6 +216,20 @@ class _MeetCallPageState extends State<MeetCallPage> {
       } else {
         _pendingIce.add(c);
       }
+    } else if (type == 'screen-on') {
+      if (mounted) setState(() => _remoteSharing = true);
+    } else if (type == 'screen-off') {
+      if (mounted) {
+        setState(() {
+          _remoteSharing = false;
+          _screenView.srcObject = null;
+        });
+      }
+    } else if (type == 'renego-offer') {
+      await _handleRenegoOffer(p);
+    } else if (type == 'renego-answer') {
+      await _pc?.setRemoteDescription(
+          RTCSessionDescription(p['sdp'] as String, p['sdpType'] as String));
     } else if (type == 'bye') {
       _fail('Görüşme sonlandırıldı');
     }
@@ -248,6 +280,101 @@ class _MeetCallPageState extends State<MeetCallPage> {
     }
   }
 
+  bool get _screenShareSupported =>
+      Platform.isWindows || Platform.isMacOS || Platform.isAndroid;
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _toggleScreenShare() async {
+    if (_sharing) {
+      await _stopScreenShare();
+    } else {
+      await _startScreenShare();
+    }
+  }
+
+  Future<void> _startScreenShare() async {
+    final pc = _pc;
+    if (pc == null) return;
+    if (_remoteSharing) {
+      _snack('Karşı taraf zaten ekran paylaşıyor');
+      return;
+    }
+    try {
+      // Android: ekran yakalamadan önce foreground service çalışmalı
+      await ScreenShareNative.start();
+      final stream = await navigator.mediaDevices
+          .getDisplayMedia({'video': true, 'audio': false});
+      _screenStream = stream;
+      final track = stream.getVideoTracks().first;
+      track.onEnded = () => _stopScreenShare();
+      _screenSender = await pc.addTrack(track, stream);
+      _sharing = true;
+      _send({'type': 'screen-on'});
+      await _renegotiate();
+      if (mounted) setState(() {});
+    } catch (_) {
+      await _cleanupScreen();
+      await _stopNativeSafely();
+      _snack('Ekran paylaşımı başlatılamadı. Sistem izinlerini kontrol edin.');
+    }
+  }
+
+  Future<void> _stopScreenShare() async {
+    if (!_sharing) return;
+    _sharing = false;
+    final pc = _pc;
+    final sender = _screenSender;
+    if (pc != null && sender != null) {
+      try {
+        await pc.removeTrack(sender);
+      } catch (_) {}
+    }
+    await _cleanupScreen();
+    await _stopNativeSafely();
+    _send({'type': 'screen-off'});
+    await _renegotiate();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _cleanupScreen() async {
+    for (final t in _screenStream?.getTracks() ?? <MediaStreamTrack>[]) {
+      t.stop();
+    }
+    await _screenStream?.dispose();
+    _screenStream = null;
+    _screenSender = null;
+  }
+
+  Future<void> _stopNativeSafely() async {
+    try {
+      await ScreenShareNative.stop();
+    } catch (_) {}
+  }
+
+  /// Ekran paylaşımı eklenince/çıkarılınca SDP yeniden anlaşması (ayrı mesaj tipleriyle)
+  Future<void> _renegotiate() async {
+    final pc = _pc;
+    if (pc == null) return;
+    final offer = await pc.createOffer({});
+    await pc.setLocalDescription(offer);
+    _send({'type': 'renego-offer', 'sdp': offer.sdp, 'sdpType': offer.type});
+  }
+
+  Future<void> _handleRenegoOffer(Map<String, dynamic> p) async {
+    final pc = _pc;
+    if (pc == null) return;
+    await pc.setRemoteDescription(
+        RTCSessionDescription(p['sdp'] as String, p['sdpType'] as String));
+    final answer = await pc.createAnswer({});
+    await pc.setLocalDescription(answer);
+    _send({'type': 'renego-answer', 'sdp': answer.sdp, 'sdpType': answer.type});
+  }
+
   void _hangUp() {
     if (_ended) return;
     _send({'type': 'bye'});
@@ -285,6 +412,9 @@ class _MeetCallPageState extends State<MeetCallPage> {
     await _pc?.close();
     await _localView.dispose();
     await _remoteView.dispose();
+    await _screenView.dispose();
+    await _cleanupScreen();
+    if (_sharing) await _stopNativeSafely();
   }
 
   // ----------------------------------------------------------
@@ -293,7 +423,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   @override
   Widget build(BuildContext context) {
     final c = context.appColors;
-    final hasRemote = _remoteView.srcObject != null;
+    final hasRemote = _remoteView.srcObject != null || _screenView.srcObject != null;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -302,7 +432,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
           children: [
             Positioned.fill(
               child: hasRemote
-                  ? RTCVideoView(_remoteView,
+                  ? RTCVideoView(_screenView.srcObject != null ? _screenView : _remoteView,
                       objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)
                   : Center(
                       child: Column(
@@ -363,6 +493,14 @@ class _MeetCallPageState extends State<MeetCallPage> {
                       color: _cameraOff ? Colors.white24 : Colors.white12,
                     ),
                   const SizedBox(width: 18),
+                  if (_screenShareSupported) ...[
+                    _circle(
+                      icon: _sharing ? Icons.stop_screen_share : Icons.screen_share,
+                      onTap: _toggleScreenShare,
+                      color: _sharing ? c.primary : Colors.white12,
+                    ),
+                    const SizedBox(width: 18),
+                  ],
                   _circle(
                     icon: Icons.call_end,
                     onTap: _hangUp,
