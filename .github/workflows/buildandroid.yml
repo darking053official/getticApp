@@ -95,16 +95,17 @@ jobs:
         run: |
           cat >> android/build.gradle << 'EOF'
 
-          subprojects {
-              afterEvaluate { project ->
-                  if (project.hasProperty('android') && project.android.namespace == null) {
-                      def ns = 'com.gettic.plugins.' + project.name.replaceAll('[^A-Za-z0-9]', '_')
-                      def manifest = new File(project.projectDir, 'src/main/AndroidManifest.xml')
+          subprojects { p ->
+              p.plugins.withId('com.android.library') {
+                  def ext = p.extensions.findByName('android')
+                  if (ext != null && ext.namespace == null) {
+                      def ns = 'com.gettic.plugins.' + p.name.replaceAll('[^A-Za-z0-9]', '_')
+                      def manifest = new File(p.projectDir, 'src/main/AndroidManifest.xml')
                       if (manifest.exists()) {
                           def m = (manifest.text =~ /package="([^"]+)"/)
                           if (m.find()) { ns = m.group(1) }
                       }
-                      project.android.namespace = ns
+                      ext.namespace = ns
                   }
               }
           }
