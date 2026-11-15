@@ -26,6 +26,7 @@ import 'pages/apps.dart';
 import 'pages/auth_page.dart';
 import 'services/cloud_vaults.dart';
 import 'services/meet_service.dart';
+import 'services/notification_service.dart';
 
 final authStateProvider = StreamProvider<AuthState>((ref) {
   return Supabase.instance.client.auth.onAuthStateChange;
@@ -47,6 +48,11 @@ void main() async {
   await Supabase.initialize(
     url: AppConstants.supabaseUrl,
     anonKey: AppConstants.supabaseAnonKey,
+  );
+
+  // Bildirimler: Meet çağrı düğmeleri (Cevapla/Reddet) MeetService'e iletilir
+  await NotificationService().initialize(
+    onResponse: MeetService.instance.onNotificationResponse,
   );
 
   // Ayarlar runApp'ten önce yüklenir: tema ve yazı boyutu titremez
