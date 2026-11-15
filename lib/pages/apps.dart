@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import 'chat_list_page.dart';
 import 'notebook_page.dart';
+import 'meet_home_page.dart';
 import 'pass_vault_page.dart';
 import 'settings_page.dart';
 
@@ -71,6 +72,17 @@ class AppsPage extends StatelessWidget {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const NotebookPage()),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _AppCard(
+              icon: Icons.videocam_outlined,
+              logoAsset: 'assets/getticmeet_logo.png',
+              title: 'Gettic Meet',
+              subtitle: 'Görüntülü ve sesli arama',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MeetHomePage()),
               ),
             ),
           ],
