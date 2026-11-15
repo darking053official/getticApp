@@ -2,8 +2,6 @@ name: Build Windows EXE
 
 on:
   workflow_dispatch:
-  push:
-    tags: [ 'v*' ]
 
 permissions:
   contents: read
@@ -18,8 +16,6 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
