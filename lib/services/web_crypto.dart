@@ -9,12 +9,11 @@
 // Test: Node WebCrypto ile Python arasında iki yönlü doğrulandı.
 // ============================================================
 
-import 'dart:async';
 import 'dart:convert';
-import 'dart:isolate';
 import 'dart:math' show Random;
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:pointycastle/export.dart' as pc;
 
@@ -25,24 +24,21 @@ class WebCrypto {
 
   static final Random _rng = Random.secure();
 
-  /// PBKDF2-SHA256 ile 32 baytlık anahtar. Arayüzü dondurmamak için isolate'te çalışır.
+  /// PBKDF2-HMAC-SHA256 ile 32 baytlık anahtar.
+  /// Yerel kripto kullanır (Android/iOS/macOS'ta cryptography_flutter sayesinde);
+  /// saf Dart'a göre çok daha hızlıdır. Sonuç web ile birebir aynıdır.
   static Future<Uint8List> deriveKey(
       String password, String salt, int iterations) async {
-    try {
-      return await Isolate.run(() => _deriveSync(password, salt, iterations));
-    } on UnsupportedError {
-      return _deriveSync(password, salt, iterations);
-    }
-  }
-
-  static Uint8List _deriveSync(String password, String salt, int iterations) {
-    final d = pc.PBKDF2KeyDerivator(pc.HMac(pc.SHA256Digest(), 64));
-    d.init(pc.Pbkdf2Parameters(
-      Uint8List.fromList(utf8.encode(salt)),
-      iterations,
-      32,
-    ));
-    return d.process(Uint8List.fromList(utf8.encode(password)));
+    final kdf = crypto.Pbkdf2(
+      macAlgorithm: crypto.Hmac.sha256(),
+      iterations: iterations,
+      bits: 256,
+    );
+    final key = await kdf.deriveKey(
+      secretKey: crypto.SecretKey(utf8.encode(password)),
+      nonce: utf8.encode(salt),
+    );
+    return Uint8List.fromList(await key.extractBytes());
   }
 
   static Uint8List _gcm(bool encrypt, Uint8List key, Uint8List iv, Uint8List input) {
