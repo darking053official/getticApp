@@ -1,0 +1,26 @@
+// ============================================================
+// lib/services/screen_share_native.dart
+// (.txt olarak verildi. Projeye eklerken adını screen_share_native.dart yapın.)
+// Android foreground service'ini Kotlin tarafında başlatır/durdurur.
+// ============================================================
+
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+
+class ScreenShareNative {
+  ScreenShareNative._();
+
+  static const MethodChannel _channel = MethodChannel('gettic/screen_share');
+
+  /// Ekran yakalamadan ÖNCE çağrılır (Android 10+ için servis şart).
+  static Future<void> start() async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('start');
+  }
+
+  static Future<void> stop() async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod('stop');
+  }
+}
