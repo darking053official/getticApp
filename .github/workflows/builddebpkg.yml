@@ -2,8 +2,6 @@ name: Build Linux DEB Package
 
 on:
   workflow_dispatch:
-  push:
-    tags: [ 'v*' ]
 
 permissions:
   contents: read
@@ -18,8 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux Deps
