@@ -126,6 +126,14 @@ jobs:
                   t += '\ndependencies {\n' + dep + '\n}\n'
               open(g, 'w', encoding='utf-8').write(t)
 
+          # flutter_local_notifications için core library desugaring (minSdk 23)
+          t = open(g, encoding='utf-8').read()
+          if 'coreLibraryDesugaringEnabled' not in t:
+              t = re.sub(r'(compileOptions \{)', r'\1\n        coreLibraryDesugaringEnabled true', t, count=1)
+          if 'desugar_jdk_libs' not in t:
+              t = re.sub(r'^dependencies \{', 'dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"', t, count=1, flags=re.M)
+          open(g, 'w', encoding='utf-8').write(t)
+
           print('Manifest ve gradle güncellendi (ekran paylaşımı).')
           PY
 
