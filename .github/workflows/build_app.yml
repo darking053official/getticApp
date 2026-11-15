@@ -142,7 +142,44 @@ jobs:
               t = re.sub(r'^android \{', 'android {\n    lint {\n        checkReleaseBuilds false\n        abortOnError false\n    }', t, count=1, flags=re.M)
               open(g, 'w', encoding='utf-8').write(t)
 
-          print('Manifest ve gradle güncellendi (ekran paylaşımı).')
+          # 3) R8'i Gradle tarafında kapat (minifyReleaseWithR8 hatası için)
+          t = open(g, encoding='utf-8').read()
+
+          release_block_match = re.search(
+              r'(buildTypes\s*\{[\s\S]*?release\s*\{)([\s\S]*?)(\n\s*\})',
+              t
+          )
+
+          if release_block_match:
+              head, body, tail = release_block_match.groups()
+
+              if re.search(r'minifyEnabled\s+(true|false)', body):
+                  body = re.sub(r'minifyEnabled\s+(true|false)', 'minifyEnabled false', body)
+              else:
+                  body = '\n            minifyEnabled false' + body
+
+              if re.search(r'shrinkResources\s+(true|false)', body):
+                  body = re.sub(r'shrinkResources\s+(true|false)', 'shrinkResources false', body)
+              else:
+                  body = '\n            shrinkResources false' + body
+
+              t = t[:release_block_match.start()] + head + body + tail + t[release_block_match.end():]
+              open(g, 'w', encoding='utf-8').write(t)
+              print('R8/minify kapatıldı: minifyEnabled false, shrinkResources false')
+          else:
+              t = re.sub(
+                  r'(android\s*\{[\s\S]*?)(\n\})',
+                  lambda mm: mm.group(1) +
+                  '\n    buildTypes {\n        release {\n'
+                  '            minifyEnabled false\n'
+                  '            shrinkResources false\n'
+                  '        }\n    }\n}' + mm.group(2),
+                  t, count=1
+              )
+              open(g, 'w', encoding='utf-8').write(t)
+              print('UYARI: release bloğu bulunamadı, android bloğuna buildTypes eklendi.')
+
+          print('Manifest ve gradle güncellendi (ekran paylaşımı + R8 kapatıldı).')
           PY
 
       # Opsiyonel: GitHub Secrets tanımlıysa APK sabit anahtarla imzalanır.
@@ -208,7 +245,7 @@ jobs:
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: dart run flutter_native_splash:create
-      - run: flutter build apk --release --split-per-abi --no-shrink
+      - run: flutter build apk --release --split-per-abi
 
       # Dosyanın bu repodaki hangi commit'ten üretildiğini kanıtlar.
       # Özel (private) repoda desteklenmeyebilir; derlemeyi bozmaz.
