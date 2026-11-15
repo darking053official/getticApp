@@ -74,6 +74,61 @@ jobs:
           sed -i 's/android:label=".*"/android:label="Gettic"/' "$MANIFEST"
           rm -f test/widget_test.dart
 
+      # ------------------------------------------------------------
+      # Ekran paylaşımı (Gettic Meet) için Android native kodu
+      # Şablonlar repoda: ci/android/ScreenShareService.kt, ci/android/MainActivity.kt
+      # ------------------------------------------------------------
+      - name: Add screen share native code
+        run: |
+          set -e
+          KT_ROOT=android/app/src/main/kotlin
+          MAIN=$(find "$KT_ROOT" -name MainActivity.kt | head -n 1)
+          PKG=$(grep -m1 '^package ' "$MAIN" | awk '{print $2}')
+          DEST="$KT_ROOT/$(echo "$PKG" | tr '.' '/')"
+          mkdir -p "$DEST"
+          for f in ScreenShareService.kt MainActivity.kt; do
+            sed "s/^package .*/package $PKG/" "ci/android/$f" > "$DEST/$f"
+          done
+          echo "Kotlin dosyaları yazıldı: $DEST (paket: $PKG)"
+
+      - name: Patch manifest and gradle for screen share
+        run: |
+          python3 - << 'PY'
+          import re
+
+          # 1) AndroidManifest: izinler ve servis
+          m = 'android/app/src/main/AndroidManifest.xml'
+          s = open(m, encoding='utf-8').read()
+          perms = [
+              'android.permission.FOREGROUND_SERVICE',
+              'android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION',
+          ]
+          for p in perms:
+              if p not in s:
+                  s = re.sub(r'(<manifest[^>]*>)',
+                             lambda mm: mm.group(1) + '\n    <uses-permission android:name="%s" />' % p,
+                             s, count=1)
+          if 'ScreenShareService' not in s:
+              service = ('    <service android:name=".ScreenShareService"'
+                         ' android:foregroundServiceType="mediaProjection"'
+                         ' android:exported="false" />\n')
+              s = s.replace('</application>', service + '</application>', 1)
+          open(m, 'w', encoding='utf-8').write(s)
+
+          # 2) app build.gradle: androidx.core (NotificationCompat için)
+          g = 'android/app/build.gradle'
+          t = open(g, encoding='utf-8').read()
+          dep = '    implementation "androidx.core:core-ktx:1.12.0"'
+          if 'androidx.core:core-ktx' not in t:
+              if re.search(r'^dependencies \{', t, re.M):
+                  t = re.sub(r'^dependencies \{', 'dependencies {\n' + dep, t, count=1, flags=re.M)
+              else:
+                  t += '\ndependencies {\n' + dep + '\n}\n'
+              open(g, 'w', encoding='utf-8').write(t)
+
+          print('Manifest ve gradle güncellendi (ekran paylaşımı).')
+          PY
+
       # Opsiyonel: GitHub Secrets tanımlıysa APK sabit anahtarla imzalanır.
       # Tanımlı değilse eskisi gibi debug anahtarıyla imzalanır.
       # Neden önemli: debug anahtarı her CI çalışmasında yeniden üretilir,
@@ -281,15 +336,17 @@ jobs:
 
       # macOS uygulamaları sandbox içinde çalışır. Varsayılan Release
       # entitlements dosyasında ağ izni YOKTUR; eklenmezse release sürümde
-      # Supabase'e bağlanılamaz. Dosya seçici ve mikrofon için de izin eklenir.
+      # Supabase'e bağlanılamaz. Dosya seçici, mikrofon ve kamera için de izin eklenir.
       - name: Configure macOS entitlements
         run: |
           for f in macos/Runner/Release.entitlements macos/Runner/DebugProfile.entitlements; do
             /usr/libexec/PlistBuddy -c "Add :com.apple.security.network.client bool true" "$f" || true
             /usr/libexec/PlistBuddy -c "Add :com.apple.security.files.user-selected.read-write bool true" "$f" || true
             /usr/libexec/PlistBuddy -c "Add :com.apple.security.device.audio-input bool true" "$f" || true
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.device.camera bool true" "$f" || true
           done
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string \"Sesli mesaj gondermek icin mikrofon gerekli\"" macos/Runner/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string \"Goruntulu gorusme icin kamera gerekli\"" macos/Runner/Info.plist || true
           
       - run: flutter pub get
       - run: flutter build macos --release
