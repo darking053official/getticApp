@@ -1,41 +1,66 @@
 // ============================================================
-// android/app/src/main/kotlin/<paket>/MainActivity.kt
-// (.txt olarak verildi. Mevcut MainActivity'niz varsa bu sınıfı
-//  onunla birleştirin: configureFlutterEngine içindeki kanal kaydı yeterli.)
+// android/app/src/main/kotlin/<paket>/ScreenShareService.kt
+// (.txt olarak verildi. Kaydederken adını ScreenShareService.kt yapın.)
+// <paket> yerine MainActivity.kt'nin paket adını yazın (ör. com.gettic.gettic).
+//
+// Ekran paylaşımı sırasında Android'in istediği foreground service.
+// Android 10+ (API 29) mediaProjection türünü, Android 14 de bunun
+// çalışırken başlatılmasını zorunlu kılar.
 // ============================================================
 package com.gettic.gettic
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
 
-class MainActivity : FlutterActivity() {
+class ScreenShareService : Service() {
 
-    private val screenShareChannel = "gettic/screen_share"
+    override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
+    override fun onCreate() {
+        super.onCreate()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID, "Ekran paylaşımı", NotificationManager.IMPORTANCE_LOW
+            )
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(channel)
+        }
+    }
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, screenShareChannel)
-            .setMethodCallHandler { call, result ->
-                val intent = Intent(this, ScreenShareService::class.java)
-                when (call.method) {
-                    "start" -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(intent)
-                        } else {
-                            startService(intent)
-                        }
-                        result.success(true)
-                    }
-                    "stop" -> {
-                        stopService(intent)
-                        result.success(true)
-                    }
-                    else -> result.notImplemented()
-                }
-            }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Gettic Meet")
+            .setContentText("Ekranınız paylaşılıyor")
+            .setSmallIcon(android.R.drawable.ic_menu_share)
+            .setOngoing(true)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+        return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        @Suppress("DEPRECATION")
+        stopForeground(true)
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "gettic_screen_share"
+        private const val NOTIFICATION_ID = 4711
     }
 }
