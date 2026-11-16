@@ -33,6 +33,11 @@ class AppSettings extends ChangeNotifier {
 
   // ---- Bildirim ----
   bool inAppNotifications = true; // kapalıysa uygulama açıkken bildirim gösterilmez
+  bool notifCallSound = true;
+  bool notifCallVibrate = true;
+  bool notifMessageSound = true;
+  bool notifMessageVibrate = true;
+  bool notifMessagePreview = true;
 
   // ---- Medya otomatik yükleme ----
   bool autoLoadPhotos = true;
@@ -80,6 +85,11 @@ class AppSettings extends ChangeNotifier {
     showReadReceipts = true;
     showTypingIndicator = true;
     inAppNotifications = true;
+    notifCallSound = true;
+    notifCallVibrate = true;
+    notifMessageSound = true;
+    notifMessageVibrate = true;
+    notifMessagePreview = true;
     autoLoadPhotos = true;
     autoLoadVideos = false;
     autoLoadAudio = true;
@@ -97,6 +107,11 @@ class AppSettings extends ChangeNotifier {
         'showReadReceipts': showReadReceipts,
         'showTypingIndicator': showTypingIndicator,
         'inAppNotifications': inAppNotifications,
+        'notifCallSound': notifCallSound,
+        'notifCallVibrate': notifCallVibrate,
+        'notifMessageSound': notifMessageSound,
+        'notifMessageVibrate': notifMessageVibrate,
+        'notifMessagePreview': notifMessagePreview,
         'autoLoadPhotos': autoLoadPhotos,
         'autoLoadVideos': autoLoadVideos,
         'autoLoadAudio': autoLoadAudio,
@@ -119,6 +134,11 @@ class AppSettings extends ChangeNotifier {
     showReadReceipts = b('showReadReceipts', showReadReceipts);
     showTypingIndicator = b('showTypingIndicator', showTypingIndicator);
     inAppNotifications = b('inAppNotifications', inAppNotifications);
+    notifCallSound = b('notifCallSound', notifCallSound);
+    notifCallVibrate = b('notifCallVibrate', notifCallVibrate);
+    notifMessageSound = b('notifMessageSound', notifMessageSound);
+    notifMessageVibrate = b('notifMessageVibrate', notifMessageVibrate);
+    notifMessagePreview = b('notifMessagePreview', notifMessagePreview);
     autoLoadPhotos = b('autoLoadPhotos', autoLoadPhotos);
     autoLoadVideos = b('autoLoadVideos', autoLoadVideos);
     autoLoadAudio = b('autoLoadAudio', autoLoadAudio);
@@ -146,6 +166,11 @@ class AppSettings extends ChangeNotifier {
       showReadReceipts = b('showReadReceipts', showReadReceipts);
       showTypingIndicator = b('showTypingIndicator', showTypingIndicator);
       inAppNotifications = b('inAppNotifications', inAppNotifications);
+      notifCallSound = b('notifCallSound', notifCallSound);
+      notifCallVibrate = b('notifCallVibrate', notifCallVibrate);
+      notifMessageSound = b('notifMessageSound', notifMessageSound);
+      notifMessageVibrate = b('notifMessageVibrate', notifMessageVibrate);
+      notifMessagePreview = b('notifMessagePreview', notifMessagePreview);
       autoLoadPhotos = b('autoLoadPhotos', autoLoadPhotos);
       autoLoadVideos = b('autoLoadVideos', autoLoadVideos);
       autoLoadAudio = b('autoLoadAudio', autoLoadAudio);
@@ -169,6 +194,11 @@ class AppSettings extends ChangeNotifier {
       await p.setBool('${_p}showReadReceipts', showReadReceipts);
       await p.setBool('${_p}showTypingIndicator', showTypingIndicator);
       await p.setBool('${_p}inAppNotifications', inAppNotifications);
+      await p.setBool('${_p}notifCallSound', notifCallSound);
+      await p.setBool('${_p}notifCallVibrate', notifCallVibrate);
+      await p.setBool('${_p}notifMessageSound', notifMessageSound);
+      await p.setBool('${_p}notifMessageVibrate', notifMessageVibrate);
+      await p.setBool('${_p}notifMessagePreview', notifMessagePreview);
       await p.setBool('${_p}autoLoadPhotos', autoLoadPhotos);
       await p.setBool('${_p}autoLoadVideos', autoLoadVideos);
       await p.setBool('${_p}autoLoadAudio', autoLoadAudio);
