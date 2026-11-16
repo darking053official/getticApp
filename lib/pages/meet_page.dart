@@ -13,6 +13,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -62,7 +63,10 @@ class _MeetCallPageState extends State<MeetCallPage> {
   Map<String, dynamic>? _lastOffer;
   DateTime? _connectedAt;
   bool _connected = false;
-  bool _hasRelay = false; // TURN (relay) adayı üretildi mi
+  final List<String> _logLines = [];
+  bool _logOpen = true;
+  bool _hasRelay = false;
+  Timer? _statsTimer; // TURN (relay) adayı üretildi mi
   String? _iceError; // TURN bilgisi alınamadıysa sebebi
   bool _speakerOn = true;
 
@@ -87,6 +91,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   void initState() {
     super.initState();
     MeetService.instance.setInCall(true);
+    _dbg('cihaz: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
     _start();
   }
 
@@ -101,6 +106,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   // Başlatma
   // ----------------------------------------------------------
   Future<void> _start() async {
+    _dbg('rol: ${widget.isCaller ? 'arayan' : 'alıcı'} callId=${widget.callId} video=${widget.video}');
     await _localView.initialize();
     await _remoteView.initialize();
     await _screenView.initialize();
@@ -115,14 +121,17 @@ class _MeetCallPageState extends State<MeetCallPage> {
       return;
     }
     _localView.srcObject = _localStream;
+    _dbg('Kamera/mikrofon hazır');
 
     _pc = await createPeerConnection(await _fetchIceConfig());
     final pc = _pc!;
     for (final track in _localStream!.getTracks()) {
       await pc.addTrack(track, _localStream!);
+      _dbg('yerel track eklendi: ${track.kind} ${track.id}');
     }
 
     pc.onTrack = (event) {
+      _dbg('uzak track: ${event.track.kind} stream=${event.streams.isEmpty ? '-' : event.streams.first.id}');
       if (event.streams.isEmpty || !mounted) return;
       final stream = event.streams.first;
       // Karşı taraf ekran paylaşıyorsa ve bu, mevcut kamera akışından farklıysa ekran akışıdır
@@ -139,7 +148,10 @@ class _MeetCallPageState extends State<MeetCallPage> {
     };
 
     pc.onIceCandidate = (c) {
-      if ((c.candidate ?? '').contains(' typ relay')) _hasRelay = true;
+      final typ = RegExp(r'typ (\w+)').firstMatch(c.candidate ?? '')?.group(1) ?? '?';
+      _dbg('aday: $typ');
+      _dbg('aday tam: ${c.candidate}');
+      if ((c.candidate ?? '').contains('typ relay')) _hasRelay = true;
       _send({
         'type': 'ice',
         'candidate': c.candidate,
@@ -148,8 +160,17 @@ class _MeetCallPageState extends State<MeetCallPage> {
       });
     };
 
+    pc.onIceGatheringState = (s) => _dbg('ICE toplama: $s');
+    pc.onSignalingState = (s) => _dbg('Sinyal durumu: $s');
     pc.onIceConnectionState = (state) {
+      _dbg('ICE durum: $state');
       if (!mounted || _ended || _connected) return;
+      // ICE bağlandıysa görüşme kurulmuş demektir (onConnectionState gecikebilir)
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        _onConnected();
+        return;
+      }
       final text = switch (state) {
         RTCIceConnectionState.RTCIceConnectionStateChecking => 'Bağlantı deneniyor...',
         RTCIceConnectionState.RTCIceConnectionStateConnected => 'Bağlanıyor...',
@@ -160,6 +181,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
     };
 
     pc.onConnectionState = (state) {
+      _dbg('Bağlantı durum: $state');
       if (!mounted || _ended) return;
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
@@ -187,6 +209,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
         .channel('call:${widget.callId}', opts: const RealtimeChannelConfig(private: true))
         .onBroadcast(event: 'signal', callback: (p) => _onSignal(p))
         .subscribe((status, error) {
+      _dbg('kanal durumu: $status ${error ?? ''}');
       if (status == RealtimeSubscribeStatus.subscribed) _onSubscribed();
     });
 
@@ -221,8 +244,10 @@ class _MeetCallPageState extends State<MeetCallPage> {
       });
     }
 
+    _statsTimer = Timer.periodic(const Duration(seconds: 3), (_) => _dumpStats());
     _watchdog = Timer(const Duration(seconds: 25), () {
       if (!_connected && !_ended) {
+        _dbg('Zaman aşımı (25 sn)');
         _fail(_hasRelay
             ? 'Bağlanamadı. TURN adayı var ama karşı taraf bağlantıyı kuramadı (karşı tarafın ağı engelliyor olabilir).'
             : (_iceError != null
@@ -235,6 +260,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   }
 
   void _onSubscribed() {
+    _dbg('Sinyal kanalı hazır (${widget.isCaller ? 'arayan' : 'alıcı'})');
     if (widget.isCaller) {
       // Arayan, alıcının "join" mesajını bekler
       _send({'type': 'caller-ready'});
@@ -251,12 +277,14 @@ class _MeetCallPageState extends State<MeetCallPage> {
   // Sinyalleşme
   // ----------------------------------------------------------
   void _send(Map<String, dynamic> payload) {
+    _dbg('gönder: ${payload['type']}');
     _signal?.sendBroadcastMessage(event: 'signal', payload: payload);
   }
 
   Future<void> _onSignal(Map<String, dynamic> p) async {
     if (_ended) return;
     final type = p['type'];
+    _dbg('al: $type');
 
     if (type == 'join' || type == 'caller-ready') {
       if (widget.isCaller && !_offerMade) await _makeOffer();
@@ -275,9 +303,15 @@ class _MeetCallPageState extends State<MeetCallPage> {
         p['sdpMLineIndex'] as int?,
       );
       if (_remoteSet) {
-        await _pc?.addCandidate(c);
+        _dbg('uzak aday ekleniyor');
+        try {
+          await _pc?.addCandidate(c);
+        } catch (e) {
+          _dbg('aday hata: $e');
+        }
       } else {
         _pendingIce.add(c);
+        _dbg('uzak aday kuyrukta (${_pendingIce.length})');
       }
     } else if (type == 'screen-on') {
       if (mounted) setState(() => _remoteSharing = true);
@@ -305,6 +339,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
     final offer = await pc.createOffer({});
     await pc.setLocalDescription(offer);
     _lastOffer = {'type': 'offer', 'sdp': offer.sdp, 'sdpType': offer.type};
+    _dbg('teklif: ${offer.sdp?.length ?? 0} bayt, m-satırı=${RegExp(r'^m=', multiLine: true).allMatches(offer.sdp ?? '').length}');
     _send(_lastOffer!);
     // Cevap gelene kadar her 3 saniyede bir tekrar gönder
     _offerRetry?.cancel();
@@ -323,6 +358,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
     await _markRemoteSet();
     final answer = await pc.createAnswer({});
     await pc.setLocalDescription(answer);
+    _dbg('cevap: ${answer.sdp?.length ?? 0} bayt, m-satırı=${RegExp(r'^m=', multiLine: true).allMatches(answer.sdp ?? '').length}');
     _send({'type': 'answer', 'sdp': answer.sdp, 'sdpType': answer.type});
   }
 
@@ -434,17 +470,111 @@ class _MeetCallPageState extends State<MeetCallPage> {
       final res = await _sb.functions.invoke('turn-credentials');
       final data = res.data;
       if (data is Map && data['iceServers'] is List) {
+        _dbg('TURN: ${(data['iceServers'] as List).length} sunucu grubu alındı');
+        for (final e in (data['iceServers'] as List)) {
+          _dbg('ICE sunucu: ${e['urls']}');
+        }
         return {'iceServers': data['iceServers']};
       }
       _iceError = 'Yanıt beklenen biçimde değil: $data';
+      _dbg('TURN hata: $_iceError');
     } catch (e) {
       _iceError = e.toString();
+      _dbg('TURN hata: $_iceError');
     }
     return _config;
   }
 
+  void _dbg(String m) {
+    final t = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    _logLines.add('${two(t.hour)}:${two(t.minute)}:${two(t.second)} $m');
+    if (_logLines.length > 400) _logLines.removeAt(0);
+    if (mounted) setState(() {});
+  }
+
+  Widget _logOverlay() {
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.72),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('LOG',
+                  style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold)),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Kopyala',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                icon: const Icon(Icons.copy, size: 16, color: Colors.white),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: _logLines.join('\n')));
+                  _snack('Log kopyalandı');
+                },
+              ),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: () => setState(() => _logOpen = !_logOpen),
+                child: Icon(_logOpen ? Icons.expand_less : Icons.expand_more,
+                    size: 18, color: Colors.white),
+              ),
+            ],
+          ),
+          if (_logOpen)
+            SizedBox(
+              height: 280,
+              child: SingleChildScrollView(
+                reverse: true,
+                child: SelectableText(
+                  _logLines.join('\n'),
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 10, fontFamily: 'monospace'),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Bağlantı çiftlerinin durumunu loga yazar (hangi adaylar denendi, hangisi seçildi).
+  Future<void> _dumpStats() async {
+    final pc = _pc;
+    if (pc == null || _connected || _ended) return;
+    try {
+      final reports = await pc.getStats();
+      final byId = {for (final r in reports) r.id: r};
+      var pairs = 0;
+      for (final r in reports) {
+        if (r.type == 'candidate-pair') {
+          pairs++;
+          final v = r.values;
+          final local = byId[v['localCandidateId']]?.values['candidateType'];
+          final remote = byId[v['remoteCandidateId']]?.values['candidateType'];
+          _dbg('çift: ${v['state']} secildi=${v['nominated']} yerel=$local uzak=$remote');
+        }
+      }
+      if (pairs == 0) _dbg('istatistik: henüz aday çifti yok (toplam rapor: ${reports.length})');
+    } catch (e) {
+      _dbg('istatistik hata: $e');
+    }
+  }
+
   void _onConnected() {
     _connected = true;
+    _statsTimer?.cancel();
+    _dbg('BAĞLANDI');
     _watchdog?.cancel();
     _offerRetry?.cancel();
     _ringTimeout?.cancel();
@@ -524,6 +654,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
 
   Future<void> _cleanup() async {
     _ended = true;
+    _statsTimer?.cancel();
     _offerRetry?.cancel();
     _watchdog?.cancel();
     _joinTimer?.cancel();
@@ -602,6 +733,12 @@ class _MeetCallPageState extends State<MeetCallPage> {
                       objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
                 ),
               ),
+            Positioned(
+              top: 8,
+              left: 8,
+              width: 300,
+              child: _logOverlay(),
+            ),
             Positioned(
               left: 0,
               right: 0,
