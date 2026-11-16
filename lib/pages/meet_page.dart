@@ -62,6 +62,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   Map<String, dynamic>? _lastOffer;
   DateTime? _connectedAt;
   bool _connected = false;
+  bool _hasRelay = false; // TURN (relay) adayı üretildi mi
   bool _speakerOn = true;
 
   final List<RTCIceCandidate> _pendingIce = [];
@@ -137,6 +138,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
     };
 
     pc.onIceCandidate = (c) {
+      if ((c.candidate ?? '').contains(' typ relay')) _hasRelay = true;
       _send({
         'type': 'ice',
         'candidate': c.candidate,
@@ -220,7 +222,9 @@ class _MeetCallPageState extends State<MeetCallPage> {
 
     _watchdog = Timer(const Duration(seconds: 25), () {
       if (!_connected && !_ended) {
-        _fail('Bağlanamadı. İki cihaz farklı ağlarda olabilir (ağ P2P bağlantısını engelliyor olabilir).');
+        _fail(_hasRelay
+            ? 'Bağlanamadı. TURN adayı var ama karşı taraf bağlantıyı kuramadı (karşı tarafın ağı engelliyor olabilir).'
+            : 'Bağlanamadı. TURN sunucusuna ulaşılamadı: turn-credentials fonksiyonunu ve secret\'ları kontrol edin.');
       }
     });
 
