@@ -225,7 +225,9 @@ class _MeetCallPageState extends State<MeetCallPage> {
       if (!_connected && !_ended) {
         _fail(_hasRelay
             ? 'Bağlanamadı. TURN adayı var ama karşı taraf bağlantıyı kuramadı (karşı tarafın ağı engelliyor olabilir).'
-            : 'Bağlanamadı. TURN bilgisi alınamadı: ${_iceError ?? 'bilinmeyen hata'}');
+            : (_iceError != null
+                ? 'Bağlanamadı. TURN bilgisi alınamadı: $_iceError'
+                : 'Bağlanamadı. TURN bilgisi alındı ama relay adayı oluşmadı. ExpressTURN kullanıcı adı/şifresi yanlış ya da 3478 portu ağda engelli olabilir.'));
       }
     });
 
