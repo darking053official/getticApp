@@ -63,6 +63,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   DateTime? _connectedAt;
   bool _connected = false;
   bool _hasRelay = false; // TURN (relay) adayı üretildi mi
+  String? _iceError; // TURN bilgisi alınamadıysa sebebi
   bool _speakerOn = true;
 
   final List<RTCIceCandidate> _pendingIce = [];
@@ -224,7 +225,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
       if (!_connected && !_ended) {
         _fail(_hasRelay
             ? 'Bağlanamadı. TURN adayı var ama karşı taraf bağlantıyı kuramadı (karşı tarafın ağı engelliyor olabilir).'
-            : 'Bağlanamadı. TURN sunucusuna ulaşılamadı: turn-credentials fonksiyonunu ve secret\'ları kontrol edin.');
+            : 'Bağlanamadı. TURN bilgisi alınamadı: ${_iceError ?? 'bilinmeyen hata'}');
       }
     });
 
@@ -433,7 +434,10 @@ class _MeetCallPageState extends State<MeetCallPage> {
       if (data is Map && data['iceServers'] is List) {
         return {'iceServers': data['iceServers']};
       }
-    } catch (_) {}
+      _iceError = 'Yanıt beklenen biçimde değil: $data';
+    } catch (e) {
+      _iceError = e.toString();
+    }
     return _config;
   }
 
