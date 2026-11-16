@@ -2,11 +2,12 @@
 // lib/services/notification_service.dart
 // (.txt olarak verildi. Projeye eklerken adını notification_service.dart yapın.)
 //
-// Kanallar:
-//  - gettic_messages : mesaj bildirimleri
-//  - gettic_calls    : gelen arama (Cevapla / Reddet düğmeli, 40 sn)
-//  - gettic_missed   : cevapsız arama
-// Gerekli paketler: flutter_local_notifications (^17.2.x), timezone (^0.9.x)
+// Ayarlara bağlı bildirimler:
+//  - Arama zil sesi / titreşimi (AppSettings.notifCallSound / notifCallVibrate)
+//  - Mesaj sesi / titreşimi / önizleme (notifMessageSound / notifMessageVibrate / notifMessagePreview)
+// Android kanal sesi sonradan değiştirilemez; bu yüzden ayar kombinasyonu başına
+// ayrı bir kanal kullanılır (ör. gettic_call_s1v0).
+// Zil sesi: android/app/src/main/res/raw/ringtone.ogg (CI bunu assets'ten kopyalar)
 // ============================================================
 
 import 'package:flutter/material.dart';
@@ -14,17 +15,13 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../core/app_settings.dart';
+
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  // Kanal kimlikleri
-  static const String messagesChannelId = 'gettic_messages';
-  static const String callsChannelId = 'gettic_calls';
-  static const String missedChannelId = 'gettic_missed';
-
-  // Gelen arama düğmeleri
   static const String actionAccept = 'accept';
   static const String actionDecline = 'decline';
 
@@ -34,7 +31,6 @@ class NotificationService {
   void Function(NotificationResponse)? _onResponse;
   bool _ready = false;
 
-  /// Bir kez çağrılır. [onResponse] bildirime veya düğmesine basılınca tetiklenir.
   Future<void> initialize({void Function(NotificationResponse)? onResponse}) async {
     if (onResponse != null) _onResponse = onResponse;
     if (_ready) return;
@@ -56,40 +52,8 @@ class NotificationService {
       },
     );
 
-    await _createChannels();
     _ready = true;
     await _requestPermissions();
-  }
-
-  Future<void> _createChannels() async {
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    if (android == null) return;
-
-    await android.createNotificationChannel(const AndroidNotificationChannel(
-      messagesChannelId,
-      'Mesaj bildirimleri',
-      description: 'Yeni mesaj bildirimleri',
-      importance: Importance.high,
-      enableLights: true,
-      ledColor: _brand,
-    ));
-
-    await android.createNotificationChannel(const AndroidNotificationChannel(
-      callsChannelId,
-      'Gelen aramalar',
-      description: 'Gelen sesli ve görüntülü aramalar',
-      importance: Importance.max,
-      playSound: true,
-      enableVibration: true,
-    ));
-
-    await android.createNotificationChannel(const AndroidNotificationChannel(
-      missedChannelId,
-      'Cevapsız aramalar',
-      description: 'Cevaplanmayan aramalar',
-      importance: Importance.defaultImportance,
-    ));
   }
 
   Future<void> _requestPermissions() async {
@@ -102,8 +66,33 @@ class NotificationService {
     await ios?.requestPermissions(alert: true, badge: true, sound: true);
   }
 
-  /// Bildirim kimliği: çağrı kimliğinden (uuid) sabit bir int üretir
   int idFor(String key) => key.hashCode & 0x7fffffff;
+
+  /// Ayar kombinasyonuna göre kanal oluşturur (varsa dokunmaz).
+  Future<String> _channel({
+    required String base,
+    required String name,
+    required Importance importance,
+    required bool sound,
+    required bool vibrate,
+    String? description,
+  }) async {
+    final id = '${base}_s${sound ? 1 : 0}v${vibrate ? 1 : 0}';
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await android?.createNotificationChannel(AndroidNotificationChannel(
+      id,
+      name,
+      description: description,
+      importance: importance,
+      playSound: sound,
+      sound: sound && base == 'gettic_calls'
+          ? const RawResourceAndroidNotificationSound('ringtone')
+          : null,
+      enableVibration: vibrate,
+    ));
+    return id;
+  }
 
   // ----------------------------------------------------------
   // Mesaj
@@ -113,101 +102,108 @@ class NotificationService {
     required String title,
     required String body,
     String? payload,
-  }) {
-    return _plugin.show(
+  }) async {
+    final s = AppSettings.instance;
+    final channelId = await _channel(
+      base: 'gettic_messages',
+      name: 'Mesaj bildirimleri',
+      importance: Importance.high,
+      sound: s.notifMessageSound,
+      vibrate: s.notifMessageVibrate,
+      description: 'Yeni mesaj bildirimleri',
+    );
+
+    await _plugin.show(
       idFor(key),
       title,
-      body,
+      s.notifMessagePreview ? body : 'Yeni mesaj',
       NotificationDetails(
         android: AndroidNotificationDetails(
-          messagesChannelId,
+          channelId,
           'Mesaj bildirimleri',
           channelDescription: 'Yeni mesaj bildirimleri',
           importance: Importance.high,
           priority: Priority.high,
+          playSound: s.notifMessageSound,
+          enableVibration: s.notifMessageVibrate,
           icon: '@mipmap/ic_launcher',
           color: _brand,
-          enableLights: true,
-          ledColor: _brand,
-          ledOnMs: 1000,
-          ledOffMs: 500,
         ),
-        iOS: const DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
-        ),
+        iOS: DarwinNotificationDetails(presentAlert: true, presentSound: s.notifMessageSound),
       ),
       payload: payload,
     );
   }
 
   // ----------------------------------------------------------
-  // Gelen arama (Cevapla / Reddet düğmeleri, 40 sn sonra kendiliğinden kapanır)
+  // Gelen arama (Cevapla / Reddet, 40 sn)
   // ----------------------------------------------------------
   Future<void> showIncomingCall({
     required String callId,
     required String fromName,
     required bool video,
-  }) {
-    return _plugin.show(
+  }) async {
+    final s = AppSettings.instance;
+    final channelId = await _channel(
+      base: 'gettic_calls',
+      name: 'Gelen aramalar',
+      importance: Importance.max,
+      sound: s.notifCallSound,
+      vibrate: s.notifCallVibrate,
+      description: 'Gelen sesli ve görüntülü aramalar',
+    );
+
+    await _plugin.show(
       idFor(callId),
       video ? 'Görüntülü arama' : 'Sesli arama',
       '$fromName arıyor',
       NotificationDetails(
         android: AndroidNotificationDetails(
-          callsChannelId,
+          channelId,
           'Gelen aramalar',
           channelDescription: 'Gelen sesli ve görüntülü aramalar',
           importance: Importance.max,
           priority: Priority.max,
           category: AndroidNotificationCategory.call,
+          playSound: s.notifCallSound,
+          enableVibration: s.notifCallVibrate,
           icon: '@mipmap/ic_launcher',
           color: _brand,
           ongoing: true,
           autoCancel: false,
           timeoutAfter: 40000,
           actions: const <AndroidNotificationAction>[
-            AndroidNotificationAction(
-              actionAccept,
-              'Cevapla',
-              showsUserInterface: true,
-            ),
-            AndroidNotificationAction(
-              actionDecline,
-              'Reddet',
-              showsUserInterface: true,
-              cancelNotification: true,
-            ),
+            AndroidNotificationAction(actionAccept, 'Cevapla', showsUserInterface: true),
+            AndroidNotificationAction(actionDecline, 'Reddet',
+                showsUserInterface: true, cancelNotification: true),
           ],
         ),
-        iOS: const DarwinNotificationDetails(
-          presentAlert: true,
-          presentSound: true,
-          categoryIdentifier: 'incomingCall',
-        ),
+        iOS: const DarwinNotificationDetails(presentAlert: true, presentSound: true),
       ),
       payload: callId,
     );
   }
 
-  // ----------------------------------------------------------
-  // Cevapsız arama
-  // ----------------------------------------------------------
   Future<void> showMissedCall({
     required String callId,
     required String fromName,
     required bool video,
-  }) {
-    return _plugin.show(
+  }) async {
+    final channelId = await _channel(
+      base: 'gettic_missed',
+      name: 'Cevapsız aramalar',
+      importance: Importance.defaultImportance,
+      sound: true,
+      vibrate: true,
+    );
+    await _plugin.show(
       idFor('missed-$callId'),
       'Cevapsız arama',
       '$fromName ${video ? 'görüntülü' : 'sesli'} aradı',
       NotificationDetails(
         android: AndroidNotificationDetails(
-          missedChannelId,
+          channelId,
           'Cevapsız aramalar',
-          channelDescription: 'Cevaplanmayan aramalar',
           importance: Importance.defaultImportance,
           priority: Priority.defaultPriority,
           icon: '@mipmap/ic_launcher',
@@ -220,9 +216,6 @@ class NotificationService {
     );
   }
 
-  // ----------------------------------------------------------
-  // Yardımcılar
-  // ----------------------------------------------------------
   Future<void> cancelCall(String callId) => _plugin.cancel(idFor(callId));
 
   Future<void> scheduleNotification({
@@ -239,7 +232,7 @@ class NotificationService {
       tz.TZDateTime.from(scheduledTime, tz.local),
       const NotificationDetails(
         android: AndroidNotificationDetails(
-          messagesChannelId,
+          'gettic_messages_s1v1',
           'Mesaj bildirimleri',
           importance: Importance.high,
           priority: Priority.high,
