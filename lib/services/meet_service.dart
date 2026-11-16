@@ -4,9 +4,10 @@
 //
 // Gettic Meet (P2P, 1:1).
 //  - Davet: meet_invites tablosuna yazılır, alıcı Realtime ile görür.
-//  - Uygulama açıksa: çağrı diyaloğu.
-//  - Uygulama arka plandaysa: "Cevapla / Reddet" bildirimi.
-//  - 40 sn cevapsız: arayana "cancelled", alıcıya (arka plandaysa) cevapsız arama bildirimi.
+//  - Uygulama açıksa: çağrı diyaloğu + gelen arama zil sesi (assets/ringtone.ogg).
+//  - Uygulama arka plandaysa: "Cevapla / Reddet" bildirimi (ses ayarlara bağlı).
+//  - Arayan iptal ederse (ya da bitirirse) alıcıdaki çağrı ekranı/bildirim kapanır.
+//  - 40 sn cevapsız: arayana "cancelled"; alıcı arka plandaysa cevapsız arama bildirimi.
 //  - Meşgul: görüşmedeyken gelen davet otomatik reddedilir.
 // Not: Uygulama tamamen kapalıysa çağrı bildirimi gelmez (push gerekir).
 // ============================================================
@@ -15,10 +16,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/theme.dart';
 import '../pages/meet_page.dart';
+import 'call_tone.dart';
 import 'notification_service.dart';
 import 'web_crypto.dart';
 
@@ -41,10 +44,12 @@ class MeetService {
   final NotificationService _notifications = NotificationService();
 
   RealtimeChannel? _inbox;
+  RealtimeChannel? _inboxUpdates;
   bool _showingIncoming = false;
   bool _inCall = false;
   Timer? _ringTimer;
   BuildContext? _dialogCtx;
+  AudioPlayer? _ringPlayer;
   final Map<String, _PendingCall> _pending = {};
 
   SupabaseClient get _sb => Supabase.instance.client;
@@ -60,11 +65,21 @@ class MeetService {
     return state == null || state == AppLifecycleState.resumed;
   }
 
-  /// Oturum açılınca çağrılır: gelen davetleri dinler.
+  // ----------------------------------------------------------
+  // Dinleme
+  // ----------------------------------------------------------
+
+  /// Oturum açılınca çağrılır: yeni davetleri ve davet güncellemelerini dinler.
   void startListening() {
     final uid = _myId;
     if (uid == null) return;
     stopListening();
+
+    final filter = PostgresChangeFilter(
+      type: PostgresChangeFilterType.eq,
+      column: 'to_id',
+      value: uid,
+    );
 
     _inbox = _sb
         .channel('meet-invites-$uid')
@@ -72,23 +87,37 @@ class MeetService {
           event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'meet_invites',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'to_id',
-            value: uid,
-          ),
+          filter: filter,
           callback: (payload) => _onInvite(payload.newRecord),
+        )
+        .subscribe();
+
+    // Arayan iptal ederse ya da bitirirse alıcıdaki çağrı kapanır
+    _inboxUpdates = _sb
+        .channel('meet-invite-updates-$uid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'meet_invites',
+          filter: filter,
+          callback: (payload) => _onInviteUpdate(payload.newRecord),
         )
         .subscribe();
   }
 
   void stopListening() {
-    final ch = _inbox;
-    if (ch != null) _sb.removeChannel(ch);
+    final a = _inbox;
+    final b = _inboxUpdates;
+    if (a != null) _sb.removeChannel(a);
+    if (b != null) _sb.removeChannel(b);
     _inbox = null;
+    _inboxUpdates = null;
   }
 
-  /// Arama başlatır: daveti kaydeder ve çağrı ekranını açar.
+  // ----------------------------------------------------------
+  // Arama başlatma
+  // ----------------------------------------------------------
+
   Future<void> startCall({
     required String toId,
     required String toName,
@@ -125,8 +154,9 @@ class MeetService {
   }
 
   // ----------------------------------------------------------
-  // Gelen çağrı
+  // Gelen davet
   // ----------------------------------------------------------
+
   void _onInvite(Map<String, dynamic> rec) {
     if (rec['status'] != 'ringing') return;
 
@@ -148,15 +178,28 @@ class MeetService {
     _ringTimer = Timer(ringDuration, () => _onRingTimeout(callId));
 
     if (_isForeground) {
+      _startRingtone();
       _showDialog(callId);
     } else {
-      // Arka planda: sistem bildirimi (Cevapla / Reddet düğmeleri)
+      // Arka planda: sistem bildirimi (Cevapla / Reddet düğmeleri, ses ayarlara bağlı)
       _notifications.showIncomingCall(
         callId: callId,
         fromName: fromName,
         video: video,
       );
     }
+  }
+
+  /// Davet güncellendi: arayan iptal etti ya da bitirdi.
+  void _onInviteUpdate(Map<String, dynamic> rec) {
+    final status = rec['status'];
+    if (status != 'cancelled' && status != 'ended') return;
+
+    final callId = rec['id'].toString();
+    if (!_pending.containsKey(callId)) return;
+
+    // Arka plandaysa cevapsız arama olarak bildir
+    _dismissRinging(callId, missed: !_isForeground);
   }
 
   void _showDialog(String callId) {
@@ -205,7 +248,7 @@ class MeetService {
     });
   }
 
-  /// Bildirimdeki düğmelere veya bildirim gövdesine basılınca çağrılır.
+  /// Bildirimdeki Cevapla / Reddet düğmeleri veya gövdeye dokunma.
   void onNotificationResponse(NotificationResponse r) {
     final callId = r.payload;
     if (callId == null) return;
@@ -214,12 +257,12 @@ class MeetService {
       _endRinging(callId, 'declined');
       return;
     }
-    // Cevapla veya gövdeye dokunma
     _accept(callId);
   }
 
   void _accept(String callId) {
-    final p = _pending[callId];
+    final p = _pending.remove(callId);
+    _stopRingtone();
     _notifications.cancelCall(callId);
     _ringTimer?.cancel();
     _ringTimer = null;
@@ -230,7 +273,6 @@ class MeetService {
       _setStatus(callId, 'cancelled');
       return;
     }
-    _pending.remove(callId);
     _setStatus(callId, 'accepted');
     _open(MeetCallPage(
       callId: callId,
@@ -244,6 +286,7 @@ class MeetService {
   void _onRingTimeout(String callId) {
     final p = _pending.remove(callId);
     _closeDialog();
+    _stopRingtone();
     _notifications.cancelCall(callId);
     _setStatus(callId, 'cancelled');
     if (p != null && !_isForeground) {
@@ -257,14 +300,48 @@ class MeetService {
     _ringTimer = null;
   }
 
-  /// Çağrıyı sonlandırır (red, kabul edilmedi vb.) ve durumu kaydeder.
+  /// Çağrıyı reddeder ya da kapatır ve durumu kaydeder.
   void _endRinging(String callId, String status) {
     _pending.remove(callId);
     _ringTimer?.cancel();
     _ringTimer = null;
     _showingIncoming = false;
+    _stopRingtone();
     _notifications.cancelCall(callId);
     _setStatus(callId, status);
+  }
+
+  /// Karşı taraf iptal ettiğinde: ekranı ve bildirimi kapatır, durumu değiştirmez.
+  void _dismissRinging(String callId, {required bool missed}) {
+    final p = _pending.remove(callId);
+    _ringTimer?.cancel();
+    _ringTimer = null;
+    _showingIncoming = false;
+    _closeDialog();
+    _stopRingtone();
+    _notifications.cancelCall(callId);
+    if (missed && p != null) {
+      _notifications.showMissedCall(
+        callId: callId,
+        fromName: p.fromName,
+        video: p.video,
+      );
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Yardımcılar
+  // ----------------------------------------------------------
+
+  Future<void> _startRingtone() async {
+    if (_ringPlayer != null) return;
+    _ringPlayer = await CallTone.loop(CallTone.ringtone);
+  }
+
+  Future<void> _stopRingtone() async {
+    final p = _ringPlayer;
+    _ringPlayer = null;
+    await CallTone.stop(p);
   }
 
   void _closeDialog() {
@@ -284,7 +361,7 @@ class MeetService {
     } catch (_) {}
   }
 
-  /// Görüşme ekranı, görüşme bitince "ended" yazmak için de kullanır.
+  /// Görüşme ekranı, görüşme bitince durum yazmak için kullanır.
   Future<void> markStatus(String callId, String status) =>
       _setStatus(callId, status);
 
