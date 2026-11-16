@@ -4,8 +4,9 @@
 //
 // 1:1 P2P görüşme (flutter_webrtc). Sinyalleşme: Supabase Realtime
 // "call:<id>" kanalı (yalnızca çağrı tarafları bilir).
-// Not: STUN kullanılır. Bazı ağlarda (kurumsal Wi-Fi, simetrik NAT)
-// doğrudan bağlantı kurulamaz; bu durumda TURN sunucusu gerekir.
+// ICE sunucuları: STUN + TURN, turn-credentials Edge Function'dan alınır.
+// TURN, simetrik NAT ve kurumsal ağlar gibi doğrudan bağlantının
+// kurulamadığı durumlarda medyayı aktarır.
 // ============================================================
 
 import 'dart:async';
@@ -113,7 +114,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
     }
     _localView.srcObject = _localStream;
 
-    _pc = await createPeerConnection(_config);
+    _pc = await createPeerConnection(await _fetchIceConfig());
     final pc = _pc!;
     for (final track in _localStream!.getTracks()) {
       await pc.addTrack(track, _localStream!);
@@ -420,6 +421,18 @@ class _MeetCallPageState extends State<MeetCallPage> {
   }
 
   /// Ekran paylaşımı eklenince/çıkarılınca SDP yeniden anlaşması (ayrı mesaj tipleriyle)
+  /// ICE sunucularını (STUN + TURN) Edge Function'dan alır. Olmazsa yalnızca STUN.
+  Future<Map<String, dynamic>> _fetchIceConfig() async {
+    try {
+      final res = await _sb.functions.invoke('turn-credentials');
+      final data = res.data;
+      if (data is Map && data['iceServers'] is List) {
+        return {'iceServers': data['iceServers']};
+      }
+    } catch (_) {}
+    return _config;
+  }
+
   void _onConnected() {
     _connected = true;
     _watchdog?.cancel();
