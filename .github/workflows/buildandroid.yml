@@ -35,6 +35,9 @@ jobs:
           # Uygulama kimliği
           sed -i 's/applicationId ".*"/applicationId "gettic.by.darking053"/' android/app/build.gradle || true
 
+          # Eklentilerin istediği NDK sürümü
+          sed -i 's/^android {/android {\n    ndkVersion "25.1.8937393"/' android/app/build.gradle || true
+
           # Derleme ve hedef SDK sürümleri
           sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/' android/app/build.gradle || true
           sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/' android/app/build.gradle || true
