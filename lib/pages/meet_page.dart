@@ -245,6 +245,14 @@ class _MeetCallPageState extends State<MeetCallPage> {
     }
 
     _statsTimer = Timer.periodic(const Duration(seconds: 3), (_) => _dumpStats());
+
+    if (mounted) setState(() => _status = widget.isCaller ? 'Aranıyor...' : 'Bağlanılıyor...');
+  }
+
+  /// 25 sn bağlantı zaman aşımı. Yalnızca teklif/cevap aşamasında başlar,
+  /// böylece alıcının açması beklenirken arama kesilmez.
+  void _startWatchdog() {
+    if (_watchdog != null || _connected) return;
     _watchdog = Timer(const Duration(seconds: 25), () {
       if (!_connected && !_ended) {
         _dbg('Zaman aşımı (25 sn)');
@@ -255,8 +263,6 @@ class _MeetCallPageState extends State<MeetCallPage> {
                 : 'Bağlanamadı. TURN bilgisi alındı ama relay adayı oluşmadı. ExpressTURN kullanıcı adı/şifresi yanlış ya da 3478 portu ağda engelli olabilir.'));
       }
     });
-
-    if (mounted) setState(() => _status = widget.isCaller ? 'Aranıyor...' : 'Bağlanılıyor...');
   }
 
   void _onSubscribed() {
@@ -284,9 +290,14 @@ class _MeetCallPageState extends State<MeetCallPage> {
   /// Realtime mesajı {type:'broadcast', event, payload:{...}} biçiminde sarar.
   /// Asıl mesaj payload içindedir; sarmalayıcıyı açıyoruz.
   Map<String, dynamic> _unwrap(Map<String, dynamic> p) {
-    final inner = p['payload'];
-    if (inner is Map) return Map<String, dynamic>.from(inner);
-    return p;
+    // Sarmalama birden fazla katmanlı olabiliyor: gerçek mesaja kadar aç
+    var cur = p;
+    for (var i = 0; i < 4; i++) {
+      final inner = cur['payload'];
+      if (inner is! Map) break;
+      cur = Map<String, dynamic>.from(inner);
+    }
+    return cur;
   }
 
   Future<void> _onSignal(Map<String, dynamic> p) async {
@@ -344,6 +355,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
     _offerMade = true;
     final pc = _pc;
     if (pc == null) return;
+    _startWatchdog();
     final offer = await pc.createOffer({});
     await pc.setLocalDescription(offer);
     _lastOffer = {'type': 'offer', 'sdp': offer.sdp, 'sdpType': offer.type};
@@ -361,6 +373,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   Future<void> _handleOffer(Map<String, dynamic> p) async {
     final pc = _pc;
     if (pc == null) return;
+    _startWatchdog();
     await pc.setRemoteDescription(
         RTCSessionDescription(p['sdp'] as String, p['sdpType'] as String));
     await _markRemoteSet();
@@ -471,7 +484,6 @@ class _MeetCallPageState extends State<MeetCallPage> {
     } catch (_) {}
   }
 
-  /// Ekran paylaşımı eklenince/çıkarılınca SDP yeniden anlaşması (ayrı mesaj tipleriyle)
   /// ICE sunucularını (STUN + TURN) Edge Function'dan alır. Olmazsa yalnızca STUN.
   Future<Map<String, dynamic>> _fetchIceConfig() async {
     try {
