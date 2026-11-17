@@ -349,13 +349,23 @@ class MeetService {
   // Yardımcılar
   // ----------------------------------------------------------
 
+  bool _ringWanted = false;
+
   Future<void> _startRingtone() async {
+    _ringWanted = true;
     if (_ringPlayer != null) return;
-    _ringPlayer = await CallTone.loop(CallTone.ringtone);
-    MeetLog.add('S', _ringPlayer == null ? 'zil sesi çalınamadı' : 'zil sesi çalıyor');
+    final player = await CallTone.loop(CallTone.ringtone);
+    // Yükleme sürerken çağrı kabul/red edildiyse sesi hemen kapat
+    if (!_ringWanted) {
+      await CallTone.stop(player);
+      return;
+    }
+    _ringPlayer = player;
+    MeetLog.add('S', player == null ? 'zil sesi çalınamadı' : 'zil sesi çalıyor');
   }
 
   Future<void> _stopRingtone() async {
+    _ringWanted = false;
     final p = _ringPlayer;
     _ringPlayer = null;
     await CallTone.stop(p);
