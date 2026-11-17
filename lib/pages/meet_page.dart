@@ -207,7 +207,10 @@ class _MeetCallPageState extends State<MeetCallPage> {
 
     _signal = _sb
         .channel('call:${widget.callId}', opts: const RealtimeChannelConfig(private: true))
-        .onBroadcast(event: 'signal', callback: (p) => _onSignal(_unwrap(p)))
+        .onBroadcast(event: 'signal', callback: (p) {
+          _dbg('ham mesaj anahtarları: ${p.keys.join(',')}');
+          _onSignal(_unwrap(p));
+        })
         .subscribe((status, error) {
       _dbg('kanal durumu: $status ${error ?? ''}');
       if (status == RealtimeSubscribeStatus.subscribed) _onSubscribed();
@@ -290,12 +293,24 @@ class _MeetCallPageState extends State<MeetCallPage> {
   /// Realtime mesajı {type:'broadcast', event, payload:{...}} biçiminde sarar.
   /// Asıl mesaj payload içindedir; sarmalayıcıyı açıyoruz.
   Map<String, dynamic> _unwrap(Map<String, dynamic> p) {
-    // Sarmalama birden fazla katmanlı olabiliyor: gerçek mesaja kadar aç
     var cur = p;
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < 6; i++) {
+      // Gerçek uygulama mesajı: "type" alanı var ve "broadcast" değil
+      if (cur['type'] != null && cur['type'] != 'broadcast') return cur;
+      Map<String, dynamic>? next;
+      // Önce "payload" alanına bak, yoksa tipli herhangi bir iç harita
       final inner = cur['payload'];
-      if (inner is! Map) break;
-      cur = Map<String, dynamic>.from(inner);
+      if (inner is Map) next = Map<String, dynamic>.from(inner);
+      if (next == null) {
+        for (final v in cur.values) {
+          if (v is Map && v.containsKey('type')) {
+            next = Map<String, dynamic>.from(v);
+            break;
+          }
+        }
+      }
+      if (next == null) return cur;
+      cur = next;
     }
     return cur;
   }
