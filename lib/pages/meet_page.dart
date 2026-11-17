@@ -18,6 +18,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/theme.dart';
+import '../services/meet_log.dart';
 import '../services/meet_service.dart';
 import '../services/screen_share_native.dart';
 
@@ -63,7 +64,6 @@ class _MeetCallPageState extends State<MeetCallPage> {
   Map<String, dynamic>? _lastOffer;
   DateTime? _connectedAt;
   bool _connected = false;
-  final List<String> _logLines = [];
   bool _logOpen = true;
   bool _hasRelay = false;
   Timer? _statsTimer; // TURN (relay) adayı üretildi mi
@@ -486,10 +486,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   }
 
   void _dbg(String m) {
-    final t = DateTime.now();
-    String two(int v) => v.toString().padLeft(2, '0');
-    _logLines.add('${two(t.hour)}:${two(t.minute)}:${two(t.second)} $m');
-    if (_logLines.length > 400) _logLines.removeAt(0);
+    MeetLog.add('P', m);
     if (mounted) setState(() {});
   }
 
@@ -519,7 +516,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
                 constraints: const BoxConstraints(),
                 icon: const Icon(Icons.copy, size: 16, color: Colors.white),
                 onPressed: () {
-                  Clipboard.setData(ClipboardData(text: _logLines.join('\n')));
+                  Clipboard.setData(ClipboardData(text: MeetLog.text));
                   _snack('Log kopyalandı');
                 },
               ),
@@ -537,7 +534,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
               child: SingleChildScrollView(
                 reverse: true,
                 child: SelectableText(
-                  _logLines.join('\n'),
+                  MeetLog.text,
                   style: const TextStyle(
                       color: Colors.white, fontSize: 10, fontFamily: 'monospace'),
                 ),
