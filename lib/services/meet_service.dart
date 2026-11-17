@@ -22,6 +22,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/theme.dart';
 import '../pages/meet_page.dart';
 import 'call_tone.dart';
+import 'meet_log.dart';
 import 'notification_service.dart';
 import 'web_crypto.dart';
 
@@ -90,7 +91,9 @@ class MeetService {
           filter: filter,
           callback: (payload) => _onInvite(payload.newRecord),
         )
-        .subscribe();
+        .subscribe((status, error) {
+      MeetLog.add('S', 'davet kanalı: $status ${error ?? ''}');
+    });
 
     // Arayan iptal ederse ya da bitirirse alıcıdaki çağrı kapanır
     _inboxUpdates = _sb
@@ -102,10 +105,14 @@ class MeetService {
           filter: filter,
           callback: (payload) => _onInviteUpdate(payload.newRecord),
         )
-        .subscribe();
+        .subscribe((status, error) {
+      MeetLog.add('S', 'güncelleme kanalı: $status ${error ?? ''}');
+    });
+    MeetLog.add('S', 'dinleme başladı (uid=$uid)');
   }
 
   void stopListening() {
+    MeetLog.add('S', 'dinleme durduruldu');
     final a = _inbox;
     final b = _inboxUpdates;
     if (a != null) _sb.removeChannel(a);
@@ -128,6 +135,7 @@ class MeetService {
     if (_inCall) throw StateError('Zaten bir görüşmedesiniz');
 
     final callId = WebCrypto.uuidV4();
+    MeetLog.add('S', 'arama başlatılıyor: $callId -> $toName (${video ? 'görüntülü' : 'sesli'})');
     final profile = await _sb
         .from('profiles')
         .select('username')
@@ -144,6 +152,7 @@ class MeetService {
       'status': 'ringing',
     });
 
+    MeetLog.add('S', 'davet kaydedildi (ringing)');
     _open(MeetCallPage(
       callId: callId,
       remoteId: toId,
@@ -158,12 +167,13 @@ class MeetService {
   // ----------------------------------------------------------
 
   void _onInvite(Map<String, dynamic> rec) {
-    if (rec['status'] != 'ringing') return;
-
     final callId = rec['id'].toString();
+    MeetLog.add('S', 'davet geldi: $callId status=${rec['status']} from=${rec['from_name']} kind=${rec['kind']}');
+    if (rec['status'] != 'ringing') return;
 
     // Meşgulse otomatik reddet
     if (_inCall || _showingIncoming) {
+      MeetLog.add('S', 'meşgul: davet otomatik reddedildi (inCall=$_inCall showing=$_showingIncoming)');
       _setStatus(callId, 'declined');
       return;
     }
@@ -177,6 +187,7 @@ class MeetService {
     _ringTimer?.cancel();
     _ringTimer = Timer(ringDuration, () => _onRingTimeout(callId));
 
+    MeetLog.add('S', 'çalıyor (${_isForeground ? 'ön plan: diyalog' : 'arka plan: bildirim'}), 40 sn');
     if (_isForeground) {
       _startRingtone();
       _showDialog(callId);
@@ -193,9 +204,9 @@ class MeetService {
   /// Davet güncellendi: arayan iptal etti ya da bitirdi.
   void _onInviteUpdate(Map<String, dynamic> rec) {
     final status = rec['status'];
-    if (status != 'cancelled' && status != 'ended') return;
-
     final callId = rec['id'].toString();
+    MeetLog.add('S', 'davet güncellendi: $callId status=$status bekleyen=${_pending.containsKey(callId)}');
+    if (status != 'cancelled' && status != 'ended') return;
     if (!_pending.containsKey(callId)) return;
 
     // Arka plandaysa cevapsız arama olarak bildir
@@ -250,6 +261,7 @@ class MeetService {
 
   /// Bildirimdeki Cevapla / Reddet düğmeleri veya gövdeye dokunma.
   void onNotificationResponse(NotificationResponse r) {
+    MeetLog.add('S', 'bildirim tepkisi: action=${r.actionId} payload=${r.payload}');
     final callId = r.payload;
     if (callId == null) return;
 
@@ -261,6 +273,7 @@ class MeetService {
   }
 
   void _accept(String callId) {
+    MeetLog.add('S', 'kabul edildi: $callId');
     final p = _pending.remove(callId);
     _stopRingtone();
     _notifications.cancelCall(callId);
@@ -284,6 +297,7 @@ class MeetService {
   }
 
   void _onRingTimeout(String callId) {
+    MeetLog.add('S', 'zaman aşımı (40 sn): $callId');
     final p = _pending.remove(callId);
     _closeDialog();
     _stopRingtone();
@@ -302,6 +316,7 @@ class MeetService {
 
   /// Çağrıyı reddeder ya da kapatır ve durumu kaydeder.
   void _endRinging(String callId, String status) {
+    MeetLog.add('S', 'çağrı sonlandı: $callId -> $status');
     _pending.remove(callId);
     _ringTimer?.cancel();
     _ringTimer = null;
@@ -313,6 +328,7 @@ class MeetService {
 
   /// Karşı taraf iptal ettiğinde: ekranı ve bildirimi kapatır, durumu değiştirmez.
   void _dismissRinging(String callId, {required bool missed}) {
+    MeetLog.add('S', 'karşı taraf iptal etti: $callId (cevapsız bildirim=$missed)');
     final p = _pending.remove(callId);
     _ringTimer?.cancel();
     _ringTimer = null;
@@ -336,6 +352,7 @@ class MeetService {
   Future<void> _startRingtone() async {
     if (_ringPlayer != null) return;
     _ringPlayer = await CallTone.loop(CallTone.ringtone);
+    MeetLog.add('S', _ringPlayer == null ? 'zil sesi çalınamadı' : 'zil sesi çalıyor');
   }
 
   Future<void> _stopRingtone() async {
@@ -358,7 +375,10 @@ class MeetService {
           .from('meet_invites')
           .update({'status': status})
           .eq('id', callId);
-    } catch (_) {}
+      MeetLog.add('S', 'durum yazıldı: $callId -> $status');
+    } catch (e) {
+      MeetLog.add('S', 'durum yazılamadı ($status): $e');
+    }
   }
 
   /// Görüşme ekranı, görüşme bitince durum yazmak için kullanır.
