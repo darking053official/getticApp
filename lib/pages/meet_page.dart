@@ -207,7 +207,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
 
     _signal = _sb
         .channel('call:${widget.callId}', opts: const RealtimeChannelConfig(private: true))
-        .onBroadcast(event: 'signal', callback: (p) => _onSignal(p))
+        .onBroadcast(event: 'signal', callback: (p) => _onSignal(_unwrap(p)))
         .subscribe((status, error) {
       _dbg('kanal durumu: $status ${error ?? ''}');
       if (status == RealtimeSubscribeStatus.subscribed) _onSubscribed();
@@ -279,6 +279,14 @@ class _MeetCallPageState extends State<MeetCallPage> {
   void _send(Map<String, dynamic> payload) {
     _dbg('gönder: ${payload['type']}');
     _signal?.sendBroadcastMessage(event: 'signal', payload: payload);
+  }
+
+  /// Realtime mesajı {type:'broadcast', event, payload:{...}} biçiminde sarar.
+  /// Asıl mesaj payload içindedir; sarmalayıcıyı açıyoruz.
+  Map<String, dynamic> _unwrap(Map<String, dynamic> p) {
+    final inner = p['payload'];
+    if (inner is Map) return Map<String, dynamic>.from(inner);
+    return p;
   }
 
   Future<void> _onSignal(Map<String, dynamic> p) async {
