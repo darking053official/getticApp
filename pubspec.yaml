@@ -95,6 +95,8 @@ flutter:
     - assets/getticnotebook_logo.png
     - assets/getticpass_logo.png
     - assets/getticmeet_logo.png
+    - assets/ringtone.ogg
+    - assets/ringback.ogg
     
 dependency_overrides:
   record: 5.1.0
