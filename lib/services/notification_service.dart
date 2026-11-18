@@ -16,6 +16,7 @@ import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../core/app_settings.dart';
+import 'meet_log.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -139,6 +140,23 @@ class NotificationService {
   // Gelen arama (Cevapla / Reddet, 40 sn)
   // ----------------------------------------------------------
   Future<void> showIncomingCall({
+    required String callId,
+    required String fromName,
+    required bool video,
+  }) async {
+    try {
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      final enabled = await android?.areNotificationsEnabled();
+      MeetLog.add('N', 'gelen arama bildirimi: izin=$enabled from=$fromName');
+      await _showIncomingCallInner(callId: callId, fromName: fromName, video: video);
+      MeetLog.add('N', 'gelen arama bildirimi gönderildi');
+    } catch (e) {
+      MeetLog.add('N', 'gelen arama bildirimi HATA: $e');
+    }
+  }
+
+  Future<void> _showIncomingCallInner({
     required String callId,
     required String fromName,
     required bool video,
