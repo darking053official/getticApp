@@ -205,14 +205,28 @@ class _MeetCallPageState extends State<MeetCallPage> {
       }
     };
 
+    final me = _sb.auth.currentUser?.id ?? '';
     _signal = _sb
-        .channel('call:${widget.callId}', opts: const RealtimeChannelConfig(private: true))
-        .onBroadcast(event: 'signal', callback: (p) {
-          _dbg('ham mesaj anahtarları: ${p.keys.join(',')}');
-          _onSignal(_unwrap(p));
-        })
+        .channel('sig-${widget.callId}-$me')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'meet_signals',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'to_id',
+            value: me,
+          ),
+          callback: (payload) {
+            final r = payload.newRecord;
+            if (r['call_id']?.toString() != widget.callId) return;
+            final body = r['body'];
+            if (body is! Map) return;
+            _onSignal(Map<String, dynamic>.from(body));
+          },
+        )
         .subscribe((status, error) {
-      _dbg('kanal durumu: $status ${error ?? ''}');
+      _dbg('sinyal kanalı: $status ${error ?? ''}');
       if (status == RealtimeSubscribeStatus.subscribed) _onSubscribed();
     });
 
@@ -287,7 +301,14 @@ class _MeetCallPageState extends State<MeetCallPage> {
   // ----------------------------------------------------------
   void _send(Map<String, dynamic> payload) {
     _dbg('gönder: ${payload['type']}');
-    _signal?.sendBroadcastMessage(event: 'signal', payload: payload);
+    final me = _sb.auth.currentUser?.id;
+    if (me == null) return;
+    _sb.from('meet_signals').insert({
+      'call_id': widget.callId,
+      'from_id': me,
+      'to_id': widget.remoteId,
+      'body': payload,
+    }).then((_) {}, onError: (e) => _dbg('sinyal yazılamadı: $e'));
   }
 
   /// Realtime mesajı {type:'broadcast', event, payload:{...}} biçiminde sarar.
