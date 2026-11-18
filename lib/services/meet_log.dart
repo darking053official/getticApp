@@ -1,9 +1,11 @@
 // ============================================================
 // lib/services/meet_log.dart
 // (.txt olarak verildi. Projeye eklerken adını meet_log.dart yapın.)
-// Meet için ortak log tamponu. Servis (S) ve görüşme ekranı (P) buraya yazar,
-// görüşme ekranındaki log panelinde ve "Kopyala" ile görünür.
+// Ayrıntılı log: Ayarlar > Tanılama > "Ayrıntılı log" açıksa kaydedilir ve gösterilir.
+// Kapalıyken hiçbir log tutulmaz.
 // ============================================================
+
+import '../core/app_settings.dart';
 
 class MeetLog {
   MeetLog._();
@@ -11,11 +13,15 @@ class MeetLog {
   static const int maxLines = 400;
   static final List<String> _lines = [];
 
+  /// Ayarlardaki "Ayrıntılı log" seçeneği
+  static bool get enabled => AppSettings.instance.detailedLog;
+
   static List<String> get lines => List.unmodifiable(_lines);
 
   static String get text => _lines.join('\n');
 
   static void add(String tag, String message) {
+    if (!enabled) return;
     final t = DateTime.now();
     String two(int v) => v.toString().padLeft(2, '0');
     String three(int v) => v.toString().padLeft(3, '0');
