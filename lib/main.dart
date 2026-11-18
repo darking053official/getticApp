@@ -26,6 +26,7 @@ import 'pages/apps.dart';
 import 'pages/auth_page.dart';
 import 'services/cloud_vaults.dart';
 import 'services/meet_service.dart';
+import 'services/meet_push_handler.dart';
 import 'services/notification_service.dart';
 
 final authStateProvider = StreamProvider<AuthState>((ref) {
@@ -70,6 +71,7 @@ void main() async {
 
   // OneSignal: açılışı geciktirmemek için beklenmez
   OneSignal.initialize(oneSignalAppId);
+  registerMeetPushHandlers();
   unawaited(OneSignal.Notifications.requestPermission(true));
 
   final currentUser = Supabase.instance.client.auth.currentUser;
