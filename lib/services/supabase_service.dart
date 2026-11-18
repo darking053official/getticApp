@@ -1,3 +1,6 @@
+// lib/services/supabase_service.dart
+// (.txt olarak verildi. Projeye eklerken adını supabase_service.dart yapın.)
+
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/constants.dart';
@@ -42,6 +45,7 @@ class SupabaseService {
   }
 
   Future<void> signOut() async {
+    await setPresence(false);
     for (var c in _typingChannels.values) {
       await c.unsubscribe();
     }
@@ -109,6 +113,18 @@ class SupabaseService {
     }).eq('id', currentUser!.id);
   }
 
+  /// Çevrimiçi durumu. Ön planda true, arka planda false.
+  Future<void> setPresence(bool online) async {
+    final me = currentUser?.id;
+    if (me == null) return;
+    try {
+      await _client.from(AppConstants.tableProfiles).update({
+        'status': online ? 'online' : 'offline',
+        'last_seen_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', me);
+    } catch (_) {}
+  }
+
   Future<List<Profile>> searchUsers(String query) async {
     if (currentUser == null) return [];
     if (query.trim().length < 2) return [];
@@ -129,13 +145,14 @@ class SupabaseService {
   // SOHBETLER
   // ==========================================
   Future<List<Map<String, dynamic>>> getMyConversationsWithUnread() async {
-    if (currentUser == null) return [];
+    final me = currentUser?.id;
+    if (me == null) return [];
 
     try {
       final members = await _client
           .from(AppConstants.tableConversationMembers)
           .select('conversation_id')
-          .eq('user_id', currentUser!.id);
+          .eq('user_id', me);
 
       final convIds = members.map((e) => e['conversation_id']).toList();
       if (convIds.isEmpty) return [];
@@ -143,16 +160,14 @@ class SupabaseService {
       final List<Map<String, dynamic>> result = [];
 
       for (var convId in convIds) {
-        // 1. Karşı tarafı bul
         final otherMember = await _client
             .from(AppConstants.tableConversationMembers)
             .select('user_id, profiles(*)')
             .eq('conversation_id', convId)
-            .neq('user_id', currentUser!.id)
+            .neq('user_id', me)
             .limit(1)
             .maybeSingle();
 
-        // 2. Son mesajı bul
         final lastMsg = await _client
             .from(AppConstants.tableMessages)
             .select('*')
@@ -161,25 +176,41 @@ class SupabaseService {
             .limit(1)
             .maybeSingle();
 
-        // 3. Sohbet detaylarını al (isim, tür)
         final convData = await _client
             .from(AppConstants.tableConversations)
             .select('type, name, created_by')
             .eq('id', convId)
             .maybeSingle();
 
+        // Okunmamış sayısı: son okuma zamanımdan sonra karşı taraftan gelen mesajlar
+        final myRow = await _client
+            .from(AppConstants.tableConversationMembers)
+            .select('last_read_at')
+            .eq('conversation_id', convId)
+            .eq('user_id', me)
+            .maybeSingle();
+        final lastRead = myRow?['last_read_at'];
+        var unreadQuery = _client
+            .from(AppConstants.tableMessages)
+            .select('id')
+            .eq('conversation_id', convId)
+            .neq('sender_id', me);
+        if (lastRead != null) {
+          unreadQuery = unreadQuery.gt('created_at', lastRead);
+        }
+        final unread = (await unreadQuery).length;
+
         result.add({
           'conversation_id': convId,
           'other_user': otherMember?['profiles'],
           'last_message': lastMsg,
-          'unread_count': 0,
+          'unread_count': unread,
           'is_group': convData?['type'] == 'group',
           'group_name': convData?['name'],
           'created_by': convData?['created_by'],
         });
       }
 
-      // Son mesaja göre sırala
       result.sort((a, b) {
         final aDate = a['last_message']?['created_at'] ?? '2000-01-01';
         final bDate = b['last_message']?['created_at'] ?? '2000-01-01';
@@ -193,8 +224,40 @@ class SupabaseService {
     }
   }
 
+  /// İki kişi arasında var olan birebir sohbeti bulur (yoksa null).
+  Future<String?> findDirectConversation(String otherUserId) async {
+    final me = currentUser?.id;
+    if (me == null) return null;
+    final mine = await _client
+        .from(AppConstants.tableConversationMembers)
+        .select('conversation_id')
+        .eq('user_id', me);
+    final myIds = mine.map((e) => e['conversation_id'].toString()).toList();
+    if (myIds.isEmpty) return null;
+
+    final shared = await _client
+        .from(AppConstants.tableConversationMembers)
+        .select('conversation_id')
+        .eq('user_id', otherUserId)
+        .inFilter('conversation_id', myIds);
+
+    for (final row in shared) {
+      final id = row['conversation_id'].toString();
+      final conv = await _client
+          .from(AppConstants.tableConversations)
+          .select('type')
+          .eq('id', id)
+          .maybeSingle();
+      if (conv?['type'] == 'direct') return id;
+    }
+    return null;
+  }
+
   Future<String> createConversation(String otherUserId) async {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
+
+    final existing = await findDirectConversation(otherUserId);
+    if (existing != null) return existing;
 
     final conv = await _client
         .from(AppConstants.tableConversations)
@@ -243,13 +306,49 @@ class SupabaseService {
   Future<void> deleteConversation(String conversationId) async {
     if (currentUser == null) return;
     try {
-      await _client.from(AppConstants.tableMessages).delete().eq('conversation_id', conversationId);
-      await _client.from(AppConstants.tableConversationMembers).delete().eq('conversation_id', conversationId);
-      await _client.from(AppConstants.tableConversations).delete().eq('id', conversationId);
+      await _client
+          .from(AppConstants.tableMessages)
+          .delete()
+          .eq('conversation_id', conversationId);
+      await _client
+          .from(AppConstants.tableConversationMembers)
+          .delete()
+          .eq('conversation_id', conversationId);
+      await _client
+          .from(AppConstants.tableConversations)
+          .delete()
+          .eq('id', conversationId);
     } catch (e) {
       print('Sohbet silme hatası: $e');
       rethrow;
     }
+  }
+
+  /// Sohbeti okundu olarak işaretler (kendi last_read_at değerim).
+  Future<void> markConversationRead(String conversationId) async {
+    final me = currentUser?.id;
+    if (me == null) return;
+    try {
+      await _client
+          .from(AppConstants.tableConversationMembers)
+          .update({'last_read_at': DateTime.now().toUtc().toIso8601String()})
+          .eq('conversation_id', conversationId)
+          .eq('user_id', me);
+    } catch (_) {}
+  }
+
+  /// Karşı tarafın son okuma zamanı. Mesajın görüldü durumu buna göre hesaplanır.
+  Future<DateTime?> getOtherReadAt(String conversationId) async {
+    final me = currentUser?.id;
+    if (me == null) return null;
+    final row = await _client
+        .from(AppConstants.tableConversationMembers)
+        .select('last_read_at')
+        .eq('conversation_id', conversationId)
+        .neq('user_id', me)
+        .maybeSingle();
+    final v = row?['last_read_at'];
+    return v == null ? null : DateTime.tryParse(v.toString())?.toLocal();
   }
 
   // ==========================================
@@ -261,7 +360,7 @@ class SupabaseService {
           .from(AppConstants.tableConversationMembers)
           .select('user_id, profiles(*)')
           .eq('conversation_id', conversationId);
-      
+
       return (data as List)
           .where((e) => e['profiles'] != null)
           .map((e) => Profile.fromJson(e['profiles']))
@@ -288,11 +387,10 @@ class SupabaseService {
   }
 
   Future<void> addGroupMembers(String conversationId, List<String> userIds) async {
-    final List<Map<String, dynamic>> inserts = userIds.map((uid) => {
-      'conversation_id': conversationId,
-      'user_id': uid,
-    }).toList();
-    
+    final List<Map<String, dynamic>> inserts = userIds
+        .map((uid) => {'conversation_id': conversationId, 'user_id': uid})
+        .toList();
+
     await _client.from(AppConstants.tableConversationMembers).insert(inserts);
   }
 
@@ -325,7 +423,8 @@ class SupabaseService {
   }
 
   /// Metin mesajı gönderir
-  Future<void> sendMessage(String conversationId, String content, {String? replyToId}) async {
+  Future<void> sendMessage(String conversationId, String content,
+      {String? replyToId}) async {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
     if (content.trim().isEmpty) throw Exception('Boş mesaj gönderilemez');
 
@@ -337,16 +436,10 @@ class SupabaseService {
       if (replyToId != null) 'reply_to': replyToId,
     });
 
-    try {
-      await _client.from(AppConstants.tableConversations).update({
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', conversationId);
-    } catch (e) {
-      print('Sohbet güncelleme hatası: $e');
-    }
+    _touchConversation(conversationId);
   }
 
-  /// Medya mesajı gönderir (fotoğraf, video, ses, dosya)
+  /// Medya mesajı gönderir (fotoğraf, video, ses, dosya, gif)
   Future<void> sendMediaMessage({
     required String conversationId,
     required String type,
@@ -365,13 +458,15 @@ class SupabaseService {
       if (replyToId != null) 'reply_to': replyToId,
     });
 
-    try {
-      await _client.from(AppConstants.tableConversations).update({
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', conversationId);
-    } catch (e) {
-      print('Sohbet güncelleme hatası: $e');
-    }
+    _touchConversation(conversationId);
+  }
+
+  void _touchConversation(String conversationId) {
+    _client
+        .from(AppConstants.tableConversations)
+        .update({'updated_at': DateTime.now().toIso8601String()})
+        .eq('id', conversationId)
+        .then((_) {}, onError: (e) => print('Sohbet güncelleme hatası: $e'));
   }
 
   Future<void> deleteMessage(String messageId) async {
@@ -391,36 +486,6 @@ class SupabaseService {
       'is_edited': true,
       'edited_at': DateTime.now().toIso8601String(),
     }).eq('id', messageId);
-  }
-
-  // ==========================================
-  // OKUNDU BİLGİSİ
-  // ==========================================
-  Future<void> markMessageAsRead(String messageId, String conversationId) async {
-    if (currentUser == null) return;
-    try {
-      await _client.from(AppConstants.tableMessageReads).upsert({
-        'message_id': messageId,
-        'conversation_id': conversationId,
-        'user_id': currentUser!.id,
-        'read_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      print('Okundu hatası: $e');
-    }
-  }
-
-  Future<bool> isMessageRead(String messageId) async {
-    try {
-      final data = await _client
-          .from(AppConstants.tableMessageReads)
-          .select('id')
-          .eq('message_id', messageId)
-          .maybeSingle();
-      return data != null;
-    } catch (e) {
-      return false;
-    }
   }
 
   // ==========================================
