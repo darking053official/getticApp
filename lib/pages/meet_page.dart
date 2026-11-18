@@ -19,6 +19,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/theme.dart';
+import '../core/app_settings.dart';
 import '../services/call_tone.dart';
 import '../services/meet_log.dart';
 import '../services/meet_service.dart';
@@ -810,12 +811,13 @@ class _MeetCallPageState extends State<MeetCallPage> {
                       objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
                 ),
               ),
-            Positioned(
-              top: 8,
-              left: 8,
-              width: 300,
-              child: _logOverlay(),
-            ),
+            if (AppSettings.instance.detailedLog)
+              Positioned(
+                top: 8,
+                left: 8,
+                width: 300,
+                child: _logOverlay(),
+              ),
             Positioned(
               left: 0,
               right: 0,
