@@ -87,8 +87,12 @@ class NotificationService {
       description: description,
       importance: importance,
       playSound: sound,
-      sound: sound && base == 'gettic_calls'
-          ? const RawResourceAndroidNotificationSound('ringtone')
+      sound: sound
+          ? (base == 'gettic_calls'
+              ? const RawResourceAndroidNotificationSound('ringtone')
+              : base == 'gettic_messages'
+                  ? const RawResourceAndroidNotificationSound('notification')
+                  : null)
           : null,
       enableVibration: vibrate,
     ));
