@@ -15,9 +15,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/theme.dart';
+import '../services/call_tone.dart';
 import '../services/meet_log.dart';
 import '../services/meet_service.dart';
 import '../services/screen_share_native.dart';
@@ -67,6 +69,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
   bool _logOpen = true;
   bool _hasRelay = false;
   Timer? _statsTimer; // TURN (relay) adayı üretildi mi
+  AudioPlayer? _ringback;
   String? _iceError; // TURN bilgisi alınamadıysa sebebi
   bool _speakerOn = true;
 
@@ -262,8 +265,26 @@ class _MeetCallPageState extends State<MeetCallPage> {
     }
 
     _statsTimer = Timer.periodic(const Duration(seconds: 3), (_) => _dumpStats());
+    if (widget.isCaller) _startRingback();
 
     if (mounted) setState(() => _status = widget.isCaller ? 'Aranıyor...' : 'Bağlanılıyor...');
+  }
+
+  /// Arayan taraf: karşı taraf açana kadar "çalıyor" sesi (assets/ringback.ogg).
+  Future<void> _startRingback() async {
+    if (_ringback != null || _connected || _ended) return;
+    final player = await CallTone.loop(CallTone.ringback);
+    if (_connected || _ended) {
+      await CallTone.stop(player);
+      return;
+    }
+    _ringback = player;
+  }
+
+  Future<void> _stopRingback() async {
+    final p = _ringback;
+    _ringback = null;
+    await CallTone.stop(p);
   }
 
   /// 25 sn bağlantı zaman aşımı. Yalnızca teklif/cevap aşamasında başlar,
@@ -626,6 +647,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
 
   void _onConnected() {
     _connected = true;
+    _stopRingback();
     _statsTimer?.cancel();
     _dbg('BAĞLANDI');
     _watchdog?.cancel();
@@ -702,11 +724,13 @@ class _MeetCallPageState extends State<MeetCallPage> {
   void _finish() {
     if (_ended) return;
     _ended = true;
+    _stopRingback();
     if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
   }
 
   Future<void> _cleanup() async {
     _ended = true;
+    await _stopRingback();
     _statsTimer?.cancel();
     _offerRetry?.cancel();
     _watchdog?.cancel();
