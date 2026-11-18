@@ -149,6 +149,7 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       AppState().setAppInForeground(true);
       _applyAutoLock();
+      MeetService.instance.onAppResumed();
     } else if (state == AppLifecycleState.paused) {
       AppState().setAppInForeground(false);
       _pausedAt = DateTime.now();
