@@ -109,7 +109,52 @@ class MeetService {
       MeetLog.add('S', 'güncelleme kanalı: $status ${error ?? ''}');
     });
     MeetLog.add('S', 'dinleme başladı (uid=$uid)');
+    _checkRingingInvites();
   }
+
+  /// Uygulama açılınca ya da ön plana gelince: son 40 sn içinde gelmiş çalan bir arama varsa göster.
+  Future<void> _checkRingingInvites() async {
+    final me = _myId;
+    if (me == null) return;
+    try {
+      final since = DateTime.now().toUtc().subtract(ringDuration).toIso8601String();
+      final rows = await _sb
+          .from('meet_invites')
+          .select('id, from_id, from_name, kind, created_at')
+          .eq('to_id', me)
+          .eq('status', 'ringing')
+          .gte('created_at', since)
+          .order('created_at', ascending: false)
+          .limit(1);
+      if (rows.isEmpty) return;
+      final r = rows.first;
+      final callId = r['id'].toString();
+      if (_pending.containsKey(callId) || _inCall || _showingIncoming) return;
+
+      final created = DateTime.parse(r['created_at'].toString()).toUtc();
+      final left = ringDuration - DateTime.now().toUtc().difference(created);
+      if (left <= Duration.zero) return;
+
+      _pending[callId] = _PendingCall(
+        r['from_id'].toString(),
+        (r['from_name'] ?? 'Biri').toString(),
+        r['kind'] == 'video',
+      );
+      _showingIncoming = true;
+      _ringTimer?.cancel();
+      _ringTimer = Timer(left, () => _onRingTimeout(callId));
+      MeetLog.add('S', 'bekleyen arama bulundu: $callId (kalan ${left.inSeconds} sn)');
+      if (_isForeground) {
+        _startRingtone();
+        _showDialog(callId);
+      }
+    } catch (e) {
+      MeetLog.add('S', 'bekleyen arama kontrolü hata: $e');
+    }
+  }
+
+  /// main.dart: uygulama ön plana gelince çağrılır.
+  void onAppResumed() => _checkRingingInvites();
 
   void stopListening() {
     MeetLog.add('S', 'dinleme durduruldu');
@@ -153,6 +198,13 @@ class MeetService {
     });
 
     MeetLog.add('S', 'davet kaydedildi (ringing)');
+    // Alıcıya push gönder (uygulama kapalıyken de ulaşsın)
+    try {
+      final res = await _sb.functions.invoke('meet-push', body: {'callId': callId});
+      MeetLog.add('S', 'push istendi: status=${res.status}');
+    } catch (e) {
+      MeetLog.add('S', 'push HATA: $e');
+    }
     _open(MeetCallPage(
       callId: callId,
       remoteId: toId,
@@ -192,12 +244,8 @@ class MeetService {
       _startRingtone();
       _showDialog(callId);
     } else {
-      // Arka planda: sistem bildirimi (Cevapla / Reddet düğmeleri, ses ayarlara bağlı)
-      _notifications.showIncomingCall(
-        callId: callId,
-        fromName: fromName,
-        video: video,
-      );
+      // Arka planda bildirimi push gönderir; burada yerel bildirim gösterilmez
+      MeetLog.add('S', 'arka plan: push bildirimi bekleniyor');
     }
   }
 
