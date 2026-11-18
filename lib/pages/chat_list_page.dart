@@ -6,7 +6,6 @@
 //  - Liste bellekte önbelleğe alınır; tekrar açılınca anında gösterilir.
 //  - Gelen mesaj yerel olarak uygulanır, her mesajda tüm liste çekilmez.
 //  - Tam yenileme en fazla her 2,5 saniyede bir yapılır.
-//  - Sekme/alt menü sayıları ve filtrelenmiş liste yalnızca veri değişince hesaplanır.
 // ============================================================
 
 import 'dart:async';
@@ -20,6 +19,7 @@ import '../core/app_state.dart';
 import '../core/theme.dart';
 import '../core/utils.dart';
 import '../models/profile.dart';
+import '../services/notification_service.dart';
 import '../services/supabase_service.dart';
 import 'chat_room_page.dart';
 import 'settings_page.dart';
@@ -29,7 +29,7 @@ const String _kMessagesTable = 'messages';
 const int _kMaxPinned = 5;
 const Duration _kMinReloadGap = Duration(milliseconds: 2500);
 
-/// Bellekte tutulan liste önbelleği. Diske yazılmaz (önizlemeler şifresiz kalmasın).
+/// Bellekte tutulan liste önbelleği. Diske yazılmaz.
 class ChatListCache {
   ChatListCache._();
   static final ChatListCache instance = ChatListCache._();
@@ -104,11 +104,11 @@ class _ChatListPageState extends State<ChatListPage>
       if (mounted) setState(() {});
     });
 
+    _service.setPresence(true);
     _bootstrap();
   }
 
   Future<void> _bootstrap() async {
-    // 1) Bellekte önbellek varsa hemen göster
     final cache = ChatListCache.instance;
     if (cache.conversations != null && cache.userId == _uid) {
       _all = cache.conversations!;
@@ -116,7 +116,6 @@ class _ChatListPageState extends State<ChatListPage>
       if (mounted) setState(_rebuildView);
     }
 
-    // 2) Kalıcı ayarlar, canlı dinleme, ağ yenilemesi
     await _loadPrefs();
     _subscribeRealtime();
     await _load(silent: _all.isNotEmpty);
@@ -137,7 +136,13 @@ class _ChatListPageState extends State<ChatListPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _scheduleReload();
+    if (state == AppLifecycleState.resumed) {
+      _service.setPresence(true);
+      _scheduleReload();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _service.setPresence(false);
+    }
   }
 
   // ==========================================
@@ -182,11 +187,64 @@ class _ChatListPageState extends State<ChatListPage>
 
   void _onMessageChange(PostgresChangePayload payload) {
     if (!mounted) return;
-    if (payload.eventType == PostgresChangeEvent.insert &&
-        _applyInsert(payload.newRecord)) {
-      return; // yerel güncelleme yapıldı, ağ isteği gerekmedi
+    if (payload.eventType == PostgresChangeEvent.insert) {
+      _notifyIfNeeded(payload.newRecord);
+      if (_applyInsert(payload.newRecord)) return;
     }
     _scheduleReload();
+  }
+
+  /// Arka planda ve açık olmayan bir sohbetten gelen mesajı bildirir.
+  void _notifyIfNeeded(Map<String, dynamic> rec) {
+    final convId = rec['conversation_id']?.toString();
+    if (convId == null || rec['sender_id']?.toString() == _uid) return;
+    if (!AppState().shouldShowNotification(convId)) return;
+    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      return; // ön plandayken liste zaten güncelleniyor
+    }
+
+    Map<String, dynamic>? conv;
+    for (final c in _all) {
+      if (_idOf(c) == convId) {
+        conv = c;
+        break;
+      }
+    }
+    final name = (conv?['other_user']?['username'] ?? 'Yeni mesaj').toString();
+
+    final type = (rec['type'] ?? 'text').toString();
+    final String body;
+    if (rec['is_deleted'] == true) {
+      body = 'Bu mesaj silindi';
+    } else {
+      switch (type) {
+        case 'image':
+          body = 'Fotoğraf';
+          break;
+        case 'video':
+          body = 'Video';
+          break;
+        case 'audio':
+        case 'voice':
+          body = 'Sesli mesaj';
+          break;
+        case 'file':
+          body = 'Dosya';
+          break;
+        case 'gif':
+          body = 'GIF';
+          break;
+        default:
+          body = (rec['content'] ?? '').toString();
+      }
+    }
+
+    NotificationService().showMessage(
+      key: rec['id'].toString(),
+      title: name,
+      body: body,
+      payload: convId,
+    );
   }
 
   /// Yeni mesajı ağa gitmeden listeye uygular.
@@ -210,7 +268,6 @@ class _ChatListPageState extends State<ChatListPage>
         'created_at': rec['created_at'],
         'sender_id': rec['sender_id'],
         'is_deleted': rec['is_deleted'] ?? false,
-        'is_read': false,
       }
       ..['unread_count'] = (!isMine && !isOpen) ? oldUnread + 1 : oldUnread;
 
@@ -328,8 +385,10 @@ class _ChatListPageState extends State<ChatListPage>
       if (!showArchive && isGroup != groupsTab) continue;
 
       if (q.isNotEmpty) {
-        final name = (c['other_user']?['username'] ?? '').toString().toLowerCase();
-        final last = (c['last_message']?['content'] ?? '').toString().toLowerCase();
+        final name =
+            (c['other_user']?['username'] ?? '').toString().toLowerCase();
+        final last =
+            (c['last_message']?['content'] ?? '').toString().toLowerCase();
         if (!name.contains(q) && !last.contains(q)) continue;
       }
       list.add(c);
@@ -431,24 +490,9 @@ class _ChatListPageState extends State<ChatListPage>
       _all = _all.map((c) => _idOf(c) == id ? next : c).toList();
       _rebuildView();
     });
-
-    try {
-      final myId = _uid;
-      final msgs = await _service
-          .streamMessages(conv['conversation_id'])
-          .first
-          .timeout(const Duration(seconds: 8));
-      for (final m in msgs) {
-        if (m.senderId != myId && !m.isRead) {
-          await _service.markMessageAsRead(m.id, conv['conversation_id']);
-        }
-      }
-      _snack('Okundu olarak işaretlendi');
-    } catch (e) {
-      _snack('Hata: $e', isError: true);
-    } finally {
-      _scheduleReload();
-    }
+    await _service.markConversationRead(id);
+    _snack('Okundu olarak işaretlendi');
+    _scheduleReload();
   }
 
   Future<void> _confirmDelete(Map<String, dynamic> conv) async {
@@ -537,7 +581,8 @@ class _ChatListPageState extends State<ChatListPage>
                   isPinned ? Icons.push_pin : Icons.push_pin_outlined,
                   color: c.primary,
                 ),
-                title: Text(isPinned ? 'Sabitlemeyi kaldır' : 'Sohbeti sabitle',
+                title: Text(
+                    isPinned ? 'Sabitlemeyi kaldır' : 'Sohbeti sabitle',
                     style: TextStyle(color: c.textPrimary)),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -789,7 +834,8 @@ class _ChatListPageState extends State<ChatListPage>
           dividerColor: Colors.transparent,
           labelColor: Colors.white,
           unselectedLabelColor: c.textSecondary,
-          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          labelStyle:
+              const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
           unselectedLabelStyle:
               const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
           tabs: [
@@ -961,6 +1007,7 @@ class _ChatListPageState extends State<ChatListPage>
       case 'video':
         return Icons.videocam_outlined;
       case 'audio':
+      case 'voice':
         return Icons.mic_none;
       case 'file':
         return Icons.insert_drive_file_outlined;
@@ -980,6 +1027,7 @@ class _ChatListPageState extends State<ChatListPage>
       case 'video':
         return 'Video';
       case 'audio':
+      case 'voice':
         return 'Sesli mesaj';
       case 'file':
         return 'Dosya';
@@ -1036,8 +1084,6 @@ class _ChatListPageState extends State<ChatListPage>
     final isMineLast = lastMsg != null &&
         lastMsg['sender_id'] != null &&
         lastMsg['sender_id'] == _uid;
-    final showTick = isMineLast && lastMsg is Map && lastMsg.containsKey('is_read');
-    final lastRead = showTick && lastMsg['is_read'] == true;
     final previewIcon = _previewIcon(lastMsg);
     final subtitleColor = unread > 0 ? c.textPrimary : c.textSecondary;
 
@@ -1054,7 +1100,9 @@ class _ChatListPageState extends State<ChatListPage>
             alignment: Alignment.centerLeft),
         secondaryBackground: _swipeBackground(c,
             color: Colors.orange,
-            icon: isArchiveView ? Icons.unarchive_outlined : Icons.archive_outlined,
+            icon: isArchiveView
+                ? Icons.unarchive_outlined
+                : Icons.archive_outlined,
             alignment: Alignment.centerRight),
         confirmDismiss: (direction) async {
           if (direction == DismissDirection.startToEnd) {
@@ -1073,8 +1121,8 @@ class _ChatListPageState extends State<ChatListPage>
             onLongPress: () => _showConversationMenu(item),
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
             leading: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -1138,29 +1186,23 @@ class _ChatListPageState extends State<ChatListPage>
               padding: const EdgeInsets.only(top: 4),
               child: Row(
                 children: [
-                  if (showTick && !deleted) ...[
-                    Icon(
-                      lastRead ? Icons.done_all : Icons.done,
-                      size: 16,
-                      color: lastRead ? Colors.lightBlueAccent : c.textSecondary,
-                    ),
-                    const SizedBox(width: 4),
-                  ],
                   if (previewIcon != null) ...[
                     Icon(previewIcon, size: 16, color: subtitleColor),
                     const SizedBox(width: 4),
                   ],
                   Expanded(
                     child: Text(
-                      (isMineLast && !showTick && !deleted ? 'Sen: ' : '') +
+                      (isMineLast && !deleted ? 'Sen: ' : '') +
                           _previewText(lastMsg),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: subtitleColor,
                         fontSize: 14,
-                        fontStyle: deleted ? FontStyle.italic : FontStyle.normal,
-                        fontWeight: unread > 0 ? FontWeight.w500 : FontWeight.normal,
+                        fontStyle:
+                            deleted ? FontStyle.italic : FontStyle.normal,
+                        fontWeight:
+                            unread > 0 ? FontWeight.w500 : FontWeight.normal,
                       ),
                     ),
                   ),
@@ -1177,14 +1219,16 @@ class _ChatListPageState extends State<ChatListPage>
                     style: TextStyle(
                       color: unread > 0 ? c.primary : c.textSecondary,
                       fontSize: 12,
-                      fontWeight: unread > 0 ? FontWeight.bold : FontWeight.normal,
+                      fontWeight:
+                          unread > 0 ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
                 if (unread > 0) ...[
                   const SizedBox(height: 6),
                   Container(
                     constraints: const BoxConstraints(minWidth: 22),
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
                       color: c.primary,
                       borderRadius: BorderRadius.circular(12),
@@ -1308,7 +1352,8 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
           .from(_kProfilesTable)
           .select()
           .ilike('username', '%$safe%');
-      final rows = await (myId != null ? base.neq('id', myId) : base).limit(20);
+      final rows =
+          await (myId != null ? base.neq('id', myId) : base).limit(20);
 
       final profiles = rows
           .map((e) => Profile.fromJson(Map<String, dynamic>.from(e)))
@@ -1334,7 +1379,8 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
     final height = MediaQuery.of(context).size.height * 0.75;
 
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
         height: height,
         decoration: BoxDecoration(
@@ -1385,7 +1431,8 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
     );
   }
 
-  Widget _hint(AppColors c, String text, {IconData icon = Icons.person_search_outlined}) {
+  Widget _hint(AppColors c, String text,
+      {IconData icon = Icons.person_search_outlined}) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
