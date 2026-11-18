@@ -29,6 +29,7 @@ class _MeetHomePageState extends State<MeetHomePage> {
   SupabaseClient get _sb => Supabase.instance.client;
 
   bool _loading = true;
+  String _query = '';
   String? _error;
   List<Map<String, dynamic>> _contacts = [];
   List<Map<String, dynamic>> _history = [];
@@ -109,6 +110,18 @@ class _MeetHomePageState extends State<MeetHomePage> {
 
   String _nameOf(String id) => _names[id] ?? 'Bilinmeyen';
 
+  String _otherIdOf(Map<String, dynamic> h) =>
+      (h['from_id'] == _me ? h['to_id'] : h['from_id']).toString();
+
+  bool _matches(String name) =>
+      _query.isEmpty || name.toLowerCase().contains(_query.toLowerCase());
+
+  List<Map<String, dynamic>> get _filteredContacts =>
+      _contacts.where((ct) => _matches(ct['username'] as String)).toList();
+
+  List<Map<String, dynamic>> get _filteredHistory =>
+      _history.where((h) => _matches(_nameOf(_otherIdOf(h)))).toList();
+
   Future<void> _call(String toId, {required bool video}) async {
     try {
       await MeetService.instance.startCall(
@@ -158,17 +171,29 @@ class _MeetHomePageState extends State<MeetHomePage> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                     children: [
+                      TextField(
+                        onChanged: (v) => setState(() => _query = v.trim()),
+                        decoration: const InputDecoration(
+                          hintText: 'Kişi veya arama ara',
+                          prefixIcon: Icon(Icons.search),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       _sectionTitle('Kişiler', c),
                       if (_contacts.isEmpty)
                         _empty('Henüz kişi yok. Önce bir sohbet başlatın.', c)
+                      else if (_filteredContacts.isEmpty)
+                        _empty('Eşleşen kişi yok.', c)
                       else
-                        for (final ct in _contacts) _contactTile(ct, c),
+                        for (final ct in _filteredContacts) _contactTile(ct, c),
                       const SizedBox(height: 20),
                       _sectionTitle('Son aramalar', c),
                       if (_history.isEmpty)
                         _empty('Henüz arama yok.', c)
+                      else if (_filteredHistory.isEmpty)
+                        _empty('Eşleşen arama yok.', c)
                       else
-                        for (final h in _history) _historyTile(h, c),
+                        for (final h in _filteredHistory) _historyTile(h, c),
                     ],
                   ),
       ),
