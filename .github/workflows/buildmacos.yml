@@ -1,0 +1,90 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.2'
+          channel: 'stable'
+          cache: true
+      - name: Setup macOS
+        run: |
+          flutter config --enable-macos-desktop
+          flutter create . --project-name gettic --org com.gettic --platforms=macos
+          rm -f test/widget_test.dart
+          find macos -name "*.pbxproj" -exec sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = [0-9.]*;/MACOSX_DEPLOYMENT_TARGET = 10.15;/g' {} \;
+          if [ -f "macos/Podfile" ]; then
+            sed -i '' "s/platform :osx, .*/platform :osx, '10.15'/" macos/Podfile
+          fi
+      - name: Configure macOS entitlements
+        run: |
+          for f in macos/Runner/Release.entitlements macos/Runner/DebugProfile.entitlements; do
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.network.client bool true" "$f" || true
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.files.user-selected.read-write bool true" "$f" || true
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.device.audio-input bool true" "$f" || true
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.device.camera bool true" "$f" || true
+          done
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string \"Sesli mesaj gondermek icin mikrofon gerekli\"" macos/Runner/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string \"Goruntulu gorusme icin kamera gerekli\"" macos/Runner/Info.plist || true
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - name: Sign and notarize macOS app (optional)
+        env:
+          MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_BASE64" ] || [ -z "$MACOS_SIGN_IDENTITY" ]; then
+            echo "::warning::macOS imzalama secret'ları tanımlı değil."
+            exit 0
+          fi
+          APP="build/macos/Build/Products/Release/gettic.app"
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERT_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          codesign --force --deep --options runtime --timestamp --entitlements macos/Runner/Release.entitlements --sign "$MACOS_SIGN_IDENTITY" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_PASSWORD" ]; then
+            ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+            OUT=$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait 2>&1) || true
+            echo "$OUT"
+            if ! echo "$OUT" | grep -q "status: Accepted"; then
+              echo "::error::Notarization başarısız oldu."
+              exit 1
+            fi
+            xcrun stapler staple "$APP"
+          fi
+          security delete-keychain "$KEYCHAIN" || true
+          rm -f "$RUNNER_TEMP/cert.p12"
+      - run: |
+          cd build/macos/Build/Products/Release/
+          ditto -c -k --sequesterRsrc --keepParent gettic.app gettic-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gettic-macos
+          path: build/macos/Build/Products/Release/gettic-macos.zip
