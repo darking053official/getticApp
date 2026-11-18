@@ -868,6 +868,14 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) => _s.update(() => _s.notifMessagePreview = v)),
                 ]),
 
+                _section('Tanılama', c),
+                _card(c, [
+                  _switch(c, Icons.bug_report_outlined, 'Ayrıntılı log',
+                      subtitle: 'Görüşme ve bildirim olaylarını kaydeder, görüşme ekranında gösterir',
+                      value: _s.detailedLog,
+                      onChanged: (v) => _s.update(() => _s.detailedLog = v)),
+                ]),
+
                 _section('Görünüm', c),
                 _card(c, [
                   _switch(c, Icons.brightness_auto, 'Sistem temasını kullan',
