@@ -20,6 +20,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/theme.dart';
+import '../pages/incoming_call_page.dart';
 import '../pages/meet_page.dart';
 import 'call_tone.dart';
 import 'meet_log.dart';
@@ -300,47 +301,32 @@ class MeetService {
   }
 
   void _showDialog(String callId) {
-    final ctx = appNavigatorKey.currentContext;
-    if (ctx == null) {
+    final nav = appNavigatorKey.currentState;
+    if (nav == null) {
       _endRinging(callId, 'declined');
       return;
     }
     final p = _pending[callId];
     if (p == null) return;
 
-    showDialog<void>(
-      context: ctx,
-      barrierDismissible: false,
-      builder: (dctx) {
-        _dialogCtx = dctx;
-        final c = dctx.appColors;
-        return AlertDialog(
-          backgroundColor: c.surface,
-          title: Text(
-            p.video ? 'Görüntülü arama' : 'Sesli arama',
-            style: TextStyle(color: c.textPrimary),
-          ),
-          content: Text('${p.fromName} arıyor',
-              style: TextStyle(color: c.textSecondary)),
-          actions: [
-            TextButton(
-              onPressed: () {
-                _closeDialog();
-                _endRinging(callId, 'declined');
-              },
-              child: Text('Reddet', style: TextStyle(color: c.danger)),
-            ),
-            TextButton(
-              onPressed: () {
-                _closeDialog();
-                _accept(callId);
-              },
-              child: Text('Cevapla', style: TextStyle(color: c.primary)),
-            ),
-          ],
+    nav.push<void>(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (ctx) {
+        _dialogCtx = ctx;
+        return IncomingCallPage(
+          fromName: p.fromName,
+          video: p.video,
+          onAccept: () {
+            _closeDialog();
+            _accept(callId);
+          },
+          onDecline: () {
+            _closeDialog();
+            _endRinging(callId, 'declined');
+          },
         );
       },
-    ).whenComplete(() {
+    )).whenComplete(() {
       _dialogCtx = null;
     });
   }
