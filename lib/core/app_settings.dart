@@ -38,6 +38,7 @@ class AppSettings extends ChangeNotifier {
   bool notifMessageSound = true;
   bool notifMessageVibrate = true;
   bool notifMessagePreview = true;
+  bool detailedLog = false; // Ayrıntılı log: açıkken görüşme/bildirim logu kaydedilir ve gösterilir
 
   // ---- Medya otomatik yükleme ----
   bool autoLoadPhotos = true;
@@ -90,6 +91,7 @@ class AppSettings extends ChangeNotifier {
     notifMessageSound = true;
     notifMessageVibrate = true;
     notifMessagePreview = true;
+    detailedLog = false;
     autoLoadPhotos = true;
     autoLoadVideos = false;
     autoLoadAudio = true;
@@ -112,6 +114,7 @@ class AppSettings extends ChangeNotifier {
         'notifMessageSound': notifMessageSound,
         'notifMessageVibrate': notifMessageVibrate,
         'notifMessagePreview': notifMessagePreview,
+        'detailedLog': detailedLog,
         'autoLoadPhotos': autoLoadPhotos,
         'autoLoadVideos': autoLoadVideos,
         'autoLoadAudio': autoLoadAudio,
@@ -139,6 +142,7 @@ class AppSettings extends ChangeNotifier {
     notifMessageSound = b('notifMessageSound', notifMessageSound);
     notifMessageVibrate = b('notifMessageVibrate', notifMessageVibrate);
     notifMessagePreview = b('notifMessagePreview', notifMessagePreview);
+    detailedLog = b('detailedLog', detailedLog);
     autoLoadPhotos = b('autoLoadPhotos', autoLoadPhotos);
     autoLoadVideos = b('autoLoadVideos', autoLoadVideos);
     autoLoadAudio = b('autoLoadAudio', autoLoadAudio);
@@ -171,6 +175,7 @@ class AppSettings extends ChangeNotifier {
       notifMessageSound = b('notifMessageSound', notifMessageSound);
       notifMessageVibrate = b('notifMessageVibrate', notifMessageVibrate);
       notifMessagePreview = b('notifMessagePreview', notifMessagePreview);
+      detailedLog = b('detailedLog', detailedLog);
       autoLoadPhotos = b('autoLoadPhotos', autoLoadPhotos);
       autoLoadVideos = b('autoLoadVideos', autoLoadVideos);
       autoLoadAudio = b('autoLoadAudio', autoLoadAudio);
@@ -199,6 +204,7 @@ class AppSettings extends ChangeNotifier {
       await p.setBool('${_p}notifMessageSound', notifMessageSound);
       await p.setBool('${_p}notifMessageVibrate', notifMessageVibrate);
       await p.setBool('${_p}notifMessagePreview', notifMessagePreview);
+      await p.setBool('${_p}detailedLog', detailedLog);
       await p.setBool('${_p}autoLoadPhotos', autoLoadPhotos);
       await p.setBool('${_p}autoLoadVideos', autoLoadVideos);
       await p.setBool('${_p}autoLoadAudio', autoLoadAudio);
