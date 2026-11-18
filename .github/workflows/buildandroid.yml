@@ -128,6 +128,20 @@ jobs:
             sed "s/^package .*/package $PAKET/" "ci/android/$dosya" > "$HEDEF/$dosya"
           done
 
+      - name: Bildirim sesi ve klavye ayarını ekle
+        run: |
+          mkdir -p android/app/src/main/res/raw
+          cp assets/notification.ogg android/app/src/main/res/raw/notification.ogg
+          cp assets/ringtone.ogg android/app/src/main/res/raw/ringtone.ogg
+          python3 - << 'PY'
+          m = 'android/app/src/main/AndroidManifest.xml'
+          s = open(m, encoding='utf-8').read()
+          if 'windowSoftInputMode' not in s:
+              s = s.replace('<activity ', '<activity android:windowSoftInputMode="adjustResize" ', 1)
+              open(m, 'w', encoding='utf-8').write(s)
+          print('Klavye ayarı (adjustResize) uygulandı.')
+          PY
+
       - name: Manifest ve Gradle dosyalarını düzenle
         run: |
           # Python betiğini base64 ile gömüyoruz (YAML heredoc sorununu önler)
