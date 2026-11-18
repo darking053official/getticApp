@@ -97,6 +97,7 @@ flutter:
     - assets/getticmeet_logo.png
     - assets/ringtone.ogg
     - assets/ringback.ogg
+    - assets/notification.ogg
     
 dependency_overrides:
   record: 5.1.0
