@@ -21,7 +21,7 @@ jobs:
       - name: Install Linux Deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev libjsoncpp-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev libjsoncpp-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libnotify-dev
       - name: Create Fake file_selector_linux Package
         run: |
           mkdir -p fake_file_selector_linux/lib
@@ -123,7 +123,7 @@ jobs:
           Architecture: amd64
           Maintainer: darking053 <writetome@gettic.dpdns.org>
           Description: Gettic - Gizlilik odaklı mesajlaşma uygulaması
-          Depends: libgtk-3-0, libblkid1, liblzma5, libsecret-1-0
+          Depends: libgtk-3-0, libblkid1, liblzma5, libsecret-1-0, libnotify4, libgstreamer1.0-0, gstreamer1.0-plugins-base
           EOF
           chmod 755 $DEB_DIR/DEBIAN
           chmod 644 $DEB_DIR/DEBIAN/control
