@@ -153,6 +153,42 @@ class MeetService {
     }
   }
 
+  /// Bildirim düğmesi (accept/decline) ya da bildirime dokunma.
+  Future<void> onPushAction(String callId, String? action) async {
+    if (action == 'decline') {
+      _endRinging(callId, 'declined');
+      return;
+    }
+    // accept veya gövdeye dokunma: daveti veritabanından al ve aç
+    try {
+      final row = await _sb
+          .from('meet_invites')
+          .select('id, from_id, from_name, kind, status')
+          .eq('id', callId)
+          .maybeSingle();
+      if (row == null || row['status'] != 'ringing') {
+        MeetLog.add('S', 'push: çağrı artık geçerli değil ($callId)');
+        return;
+      }
+      _pending.remove(callId);
+      _ringTimer?.cancel();
+      _ringTimer = null;
+      _stopRingtone();
+      _notifications.cancelCall(callId);
+      _showingIncoming = false;
+      _setStatus(callId, 'accepted');
+      _open(MeetCallPage(
+        callId: callId,
+        remoteId: row['from_id'].toString(),
+        remoteName: (row['from_name'] ?? 'Biri').toString(),
+        isCaller: false,
+        video: row['kind'] == 'video',
+      ));
+    } catch (e) {
+      MeetLog.add('S', 'push eylemi hata: $e');
+    }
+  }
+
   /// main.dart: uygulama ön plana gelince çağrılır.
   void onAppResumed() => _checkRingingInvites();
 
@@ -224,7 +260,9 @@ class MeetService {
     if (rec['status'] != 'ringing') return;
 
     // Meşgulse otomatik reddet
-    if (_inCall || _showingIncoming) {
+    // Meşgul: yalnızca gerçek bir çağrı ekranı ya da açık diyalog varsa
+    // (takılı kalmış bayrak yüzünden davetler sessizce reddedilmesin)
+    if (_inCall || (_showingIncoming && _dialogCtx != null)) {
       MeetLog.add('S', 'meşgul: davet otomatik reddedildi (inCall=$_inCall showing=$_showingIncoming)');
       _setStatus(callId, 'declined');
       return;
