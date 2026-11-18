@@ -1,3 +1,8 @@
+// ============================================================
+// lib/pages/chat_room_page.dart
+// (.txt olarak verildi. Projeye eklerken adını chat_room_page.dart yapın.)
+// ============================================================
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -12,7 +17,6 @@ import 'package:record/record.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
-import 'package:emoji_text_field/emoji_text_field.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_state.dart';
@@ -24,16 +28,15 @@ import '../services/storage_service.dart';
 import 'profile_preview.dart';
 
 // ============================================================
-// ⚠️ PROJENE GÖRE KONTROL EDİLECEK 2 AYAR
+// AYARLAR
 // ============================================================
 /// Chat medyalarının yüklendiği Supabase Storage bucket adı.
 const String _kMediaBucket = 'chat-media';
 
-/// GIF arama için kullandığın Supabase Edge Function adı.
+/// GIF arama için kullanılan Supabase Edge Function adı.
 const String _kGifFunctionName = 'search-gifs';
 
 /// Yarım kalan mesajlar cihazda saklansın mı?
-/// (SharedPreferences kullanılır, şifresizdir. Kapatmak için false yap.)
 const bool _kPersistDrafts = true;
 
 /// İmzalı URL önbelleği (süre dolmadan yenilenir).
@@ -45,8 +48,6 @@ class _CachedUrl {
 
 // ============================================================
 // MESAJ DÜZENLEME DİYALOĞU
-// Controller'ı kendi State'i yönettiği için sızıntı / "used after
-// dispose" hatası olmaz.
 // ============================================================
 class _EditMessageDialog extends StatefulWidget {
   final String initialText;
@@ -94,8 +95,7 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
         ),
         TextButton(
           onPressed: _submit,
-          child: const Text('Kaydet',
-              style: TextStyle(color: AppTheme.primary)),
+          child: const Text('Kaydet', style: TextStyle(color: AppTheme.primary)),
         ),
       ],
     );
@@ -117,7 +117,7 @@ class ChatRoomPage extends StatefulWidget {
 
 class _ChatRoomPageState extends State<ChatRoomPage>
     with WidgetsBindingObserver {
-  // ---- Sabitler (ihtiyaca göre değiştirebilirsin) ----
+  // ---- Sabitler ----
   static const int _maxUploadBytes = 25 * 1024 * 1024; // 25 MB
   static const int _maxRecordSeconds = 120;
   static const int _minRecordSeconds = 1;
@@ -131,13 +131,13 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   List<Message> _messages = [];
   StreamSubscription<List<Message>>? _messagesSubscription;
   RealtimeChannel? _typingChannel;
+  RealtimeChannel? _readChannel;
 
   Timer? _typingTimer;
   Timer? _typingDebounce;
   Timer? _recordTimer;
+  Timer? _markReadDebounce;
 
-  // Aynı mesaj için tekrar tekrar "okundu" isteği atmamak için
-  final Set<dynamic> _markingRead = {};
   // Storage path -> imzalı URL önbelleği
   final Map<String, _CachedUrl> _urlCache = {};
   // Mesaj id -> GlobalKey (alıntıya tıklayınca o mesaja gitmek için)
@@ -147,6 +147,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   dynamic _highlightId;
   int _newWhileAway = 0;
   bool _isForeground = true;
+
+  // Karşı tarafın son okuma zamanı (görüldü hesabı için)
+  DateTime? _otherReadAt;
 
   bool _isOtherTyping = false;
   bool _isSending = false;
@@ -166,19 +169,21 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     AppState().setActiveConversation(widget.conversationId);
     _subscribeToMessages();
     _subscribeToTyping();
+    _subscribeToReads();
+    _refreshOtherReadAt();
     _setupScrollListener();
     WidgetsBinding.instance.addObserver(this);
     _loadDraft();
     _controller.addListener(_onDraftChanged);
   }
 
-  /// Uygulama arka plandayken mesajlar "okundu" işaretlenmesin (gizlilik).
+  /// Uygulama arka plandayken mesajlar okundu işaretlenmez (gizlilik).
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final fg = state == AppLifecycleState.resumed;
     if (fg == _isForeground) return;
     _isForeground = fg;
-    if (fg) _markIncomingAsRead(_messages, _service.currentUser?.id);
+    if (fg) _markRead();
   }
 
   // ==========================================
@@ -239,14 +244,13 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         final oldLastId = _messages.isNotEmpty ? _messages.last.id : null;
         final hasNewLast = msgs.isNotEmpty && msgs.last.id != oldLastId;
         final lastIsMine = msgs.isNotEmpty && msgs.last.senderId == myId;
-
         final lastIsFromOther = msgs.isNotEmpty && !lastIsMine;
 
         setState(() {
           _messages = msgs;
           _isLoading = false;
           if (hasNewLast && lastIsFromOther) {
-            _isOtherTyping = false; // mesaj geldi, "yazıyor" bitti
+            _isOtherTyping = false;
             if (!wasNearBottom) _newWhileAway++;
           }
         });
@@ -255,7 +259,6 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           _firstLoad = false;
           _scrollToBottom(animated: false);
         } else if (hasNewLast && (wasNearBottom || lastIsMine)) {
-          // Kullanıcı eski mesajları okuyorsa onu aşağı zıplatma
           _scrollToBottom();
         }
 
@@ -269,22 +272,53 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     );
   }
 
+  /// Gelen mesaj varsa sohbeti okundu olarak işaretler (en fazla 1 sn'de bir).
   void _markIncomingAsRead(List<Message> msgs, String? myId) {
     if (!_isForeground) return;
-    for (final m in msgs) {
-      if (m.senderId != myId && !m.isRead && _markingRead.add(m.id)) {
-        _markAsRead(m);
-      }
-    }
+    final hasIncoming = msgs.any((m) => m.senderId != myId);
+    if (!hasIncoming) return;
+    _markRead();
   }
 
-  Future<void> _markAsRead(Message m) async {
-    try {
-      await _service.markMessageAsRead(m.id, widget.conversationId);
-    } catch (_) {
-      // Başarısız olursa bir sonraki güncellemede tekrar denenebilsin
-      _markingRead.remove(m.id);
-    }
+  void _markRead() {
+    if (!_isForeground) return;
+    if (_markReadDebounce?.isActive ?? false) return;
+    _service.markConversationRead(widget.conversationId);
+    _markReadDebounce = Timer(const Duration(seconds: 1), () {});
+  }
+
+  // ==========================================
+  // GÖRÜLDÜ (karşı tarafın okuma zamanı)
+  // ==========================================
+  void _subscribeToReads() {
+    _readChannel = Supabase.instance.client
+        .channel('read-${widget.conversationId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'conversation_members',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'conversation_id',
+            value: widget.conversationId,
+          ),
+          callback: (_) => _refreshOtherReadAt(),
+        )
+        .subscribe();
+  }
+
+  Future<void> _refreshOtherReadAt() async {
+    final t = await _service.getOtherReadAt(widget.conversationId);
+    if (!mounted) return;
+    setState(() => _otherReadAt = t);
+  }
+
+  /// Karşı taraf bu mesajı okudu mu? (mesaj zamanı <= karşının son okuma zamanı)
+  bool _isReadByOther(Message m) {
+    final r = _otherReadAt;
+    final c = _createdAtOf(m);
+    if (r == null || c == null) return false;
+    return !c.isAfter(r);
   }
 
   // ==========================================
@@ -319,9 +353,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         widget.conversationId,
         _service.currentUser?.email?.split('@').first ?? 'Biri',
       );
-    } catch (_) {
-      // Yazıyor bilgisi kritik değil, sessizce geç
-    }
+    } catch (_) {}
   }
 
   // ==========================================
@@ -375,7 +407,6 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
     BuildContext? target = _messageKeys[id]?.currentContext;
     if (target == null) {
-      // Öğe henüz çizilmemiş: yaklaşık konuma git, sonra hassas hizala
       final max = _scroll.position.maxScrollExtent;
       final denom = _messages.length > 1 ? _messages.length - 1 : 1;
       final approx = (max * idx / denom).clamp(0.0, max).toDouble();
@@ -422,10 +453,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           replyToId: reply?.id);
     } catch (e) {
       if (mounted) {
-        // Hem metni hem yanıt bilgisini geri yükle
         _controller.text = text;
-        _controller.selection =
-            TextSelection.collapsed(offset: text.length);
+        _controller.selection = TextSelection.collapsed(offset: text.length);
         setState(() => _replyTo = reply);
         _showSnack('Mesaj gönderilemedi: $e', isError: true);
       }
@@ -441,8 +470,6 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         builder: (_) => ProfilePreviewPage(
           profile: widget.otherUser,
           onMessageTap: () => Navigator.pop(context),
-          // TODO: Gerçek engelleme / bildirme servis çağrıları eklenmeli.
-          // Şu an sadece snackbar gösteriyor.
           onBlockTap: () async {
             Navigator.pop(context);
             _showSnack('${widget.otherUser.username} engellendi');
@@ -541,8 +568,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           ),
           const SizedBox(height: 8),
           Text(label,
-              style: const TextStyle(
-                  color: AppTheme.textPrimary, fontSize: 12)),
+              style:
+                  const TextStyle(color: AppTheme.textPrimary, fontSize: 12)),
         ],
       ),
     );
@@ -566,7 +593,6 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     }
   }
 
-  /// Yanlışlıkla gönderimi önlemek için göndermeden önce önizleme.
   Future<bool?> _confirmSendImage(File file) {
     return showDialog<bool>(
       context: context,
@@ -588,8 +614,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('Gönder',
-                style: TextStyle(color: AppTheme.primary)),
+            child:
+                const Text('Gönder', style: TextStyle(color: AppTheme.primary)),
           ),
         ],
       ),
@@ -812,8 +838,6 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       );
   }
 
-  // ---- Message modeli alanlarına güvenli erişim ----
-  // (Model'inde alan adı farklıysa uygulama çökmez, sadece o özellik boş kalır.)
   DateTime? _createdAtOf(Message m) {
     try {
       final dynamic d = m;
@@ -851,8 +875,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   bool _isEditedOf(Message m) {
     try {
       final dynamic d = m;
-      final v = d.isEdited;
-      return v == true;
+      return d.isEdited == true;
     } catch (_) {
       return false;
     }
@@ -875,15 +898,13 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       }
     })();
 
-    // İmzalı URL 60 dk geçerli; 50 dk sonra yenilenir.
     _urlCache[path] =
         _CachedUrl(future, DateTime.now().add(const Duration(minutes: 50)));
 
-    // Başarısız olursa 20 sn sonra tekrar denensin (sürekli istek atmasın)
     future.then((url) {
       if (url == null) {
-        _urlCache[path] = _CachedUrl(
-            future, DateTime.now().add(const Duration(seconds: 20)));
+        _urlCache[path] =
+            _CachedUrl(future, DateTime.now().add(const Duration(seconds: 20)));
       }
     });
     return future;
@@ -897,6 +918,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       case 'video':
         return '🎥 Video';
       case 'audio':
+      case 'voice':
         return '🎤 Ses';
       case 'gif':
         return 'GIF';
@@ -981,8 +1003,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                       style: TextStyle(color: Colors.redAccent)),
                   onTap: () async {
                     Navigator.pop(ctx);
-                    final ok = await _confirmDialog(
-                        'Mesajı Sil', 'Bu mesajı silmek istediğine emin misin?');
+                    final ok = await _confirmDialog('Mesajı Sil',
+                        'Bu mesajı silmek istediğine emin misin?');
                     if (ok != true || !mounted) return;
                     try {
                       await _service.deleteMessage(msg.id);
@@ -1009,7 +1031,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     );
 
     if (newText == null || !mounted) return;
-    if (newText == original.trim()) return; // değişiklik yok
+    if (newText == original.trim()) return;
 
     try {
       await _service.editMessage(msg.id, newText);
@@ -1035,8 +1057,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('Sil',
-                style: TextStyle(color: Colors.redAccent)),
+            child: const Text('Sil', style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -1048,6 +1069,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_onDraftChanged);
     _draftTimer?.cancel();
+    _markReadDebounce?.cancel();
     unawaited(_persistDraft(_controller.text));
     _inputFocus.dispose();
     AppState().clearActiveConversation();
@@ -1055,7 +1077,6 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     _typingDebounce?.cancel();
     _recordTimer?.cancel();
 
-    // Kayıt sürerken sayfadan çıkılırsa kaydı iptal et, sonra dispose et
     if (_isRecording) {
       _audioRecorder
           .cancel()
@@ -1067,6 +1088,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
     _messagesSubscription?.cancel();
     _typingChannel?.unsubscribe();
+    _readChannel?.unsubscribe();
     _service.unsubscribeTyping(widget.conversationId);
     _controller.dispose();
     _scroll.dispose();
@@ -1080,6 +1102,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
+      resizeToAvoidBottomInset: true,
       appBar: _buildAppBar(),
       body: Column(
         children: [
@@ -1319,6 +1342,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     final bubbleColor = isMine ? AppTheme.primary : AppTheme.surface;
     final textColor = isMine ? Colors.white : AppTheme.textPrimary;
     final metaColor = isMine ? Colors.white70 : AppTheme.textSecondary;
+    final read = isMine && _isReadByOther(msg);
 
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
@@ -1361,9 +1385,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     if (isMine && !msg.isDeleted) ...[
                       const SizedBox(width: 4),
                       Icon(
-                        msg.isRead ? Icons.done_all : Icons.done,
+                        read ? Icons.done_all : Icons.done,
                         size: 14,
-                        color: msg.isRead ? Colors.lightBlueAccent : metaColor,
+                        color: read ? Colors.lightBlueAccent : metaColor,
                       ),
                     ],
                   ],
@@ -1453,6 +1477,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       case 'video':
         return _mediaVideo(msg);
       case 'audio':
+      case 'voice':
         return _mediaAudio(msg, textColor);
       case 'file':
         return _mediaFile(msg, textColor);
@@ -1772,8 +1797,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           child: Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.delete_outline,
-                    color: Colors.redAccent),
+                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                 onPressed: () => _stopRecording(send: false),
               ),
               const Icon(Icons.fiber_manual_record,
@@ -1810,8 +1834,6 @@ class _SwipeToReply extends StatefulWidget {
   final Widget child;
   final VoidCallback onReply;
   final bool enabled;
-
-  /// true ise sola kaydırılır (kendi mesajlarım sağda olduğu için)
   final bool reverse;
   const _SwipeToReply({
     required this.child,
@@ -1898,7 +1920,6 @@ class _AudioPlayerTile extends StatefulWidget {
 }
 
 class _AudioPlayerTileState extends State<_AudioPlayerTile> {
-  // Aynı anda sadece tek ses çalsın
   static _AudioPlayerTileState? _current;
 
   static const List<double> _speeds = [1.0, 1.5, 2.0];
@@ -2031,8 +2052,8 @@ class _AudioPlayerTileState extends State<_AudioPlayerTile> {
                     SliderTheme(
                       data: SliderTheme.of(context).copyWith(
                         trackHeight: 2,
-                        thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 5),
+                        thumbShape:
+                            const RoundSliderThumbShape(enabledThumbRadius: 5),
                         overlayShape: SliderComponentShape.noOverlay,
                         activeTrackColor: widget.color,
                         inactiveTrackColor: widget.color.withOpacity(0.3),
@@ -2119,9 +2140,10 @@ class _ImageViewerPage extends StatelessWidget {
             fit: BoxFit.contain,
             placeholder: (_, __) =>
                 const CircularProgressIndicator(color: AppTheme.primary),
-            errorWidget: (_, __, ___) =>
-                const Icon(Icons.broken_image_outlined,
-                    color: Colors.white54, size: 48),
+            errorWidget: (_, __, ___) => const Icon(
+                Icons.broken_image_outlined,
+                color: Colors.white54,
+                size: 48),
           ),
         ),
       ),
@@ -2197,8 +2219,7 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
     if (vc == null) return;
     try {
       final v = vc.value;
-      final ended =
-          v.duration > Duration.zero && v.position >= v.duration;
+      final ended = v.duration > Duration.zero && v.position >= v.duration;
       if (v.isPlaying && !ended) {
         await vc.pause();
         _hideTimer?.cancel();
@@ -2407,7 +2428,6 @@ class _GifSearchSheetState extends State<_GifSearchSheet> {
         body: {'query': query, 'q': query, 'limit': 30},
       );
       final urls = _parseGifs(res.data);
-      // Eski (geç gelen) cevapları yok say
       if (!mounted || id != _requestId) return;
       setState(() {
         _gifs = urls;
@@ -2422,7 +2442,7 @@ class _GifSearchSheetState extends State<_GifSearchSheet> {
     }
   }
 
-  /// Farklı GIF servislerinin (Giphy, Tenor, özel) cevap biçimlerini tolere eder.
+  /// Farklı GIF servislerinin cevap biçimlerini tolere eder.
   static List<String> _parseGifs(dynamic data) {
     dynamic d = data;
     if (d is String) {
@@ -2452,11 +2472,11 @@ class _GifSearchSheetState extends State<_GifSearchSheet> {
       if (v is String && v.startsWith('http')) return v;
     }
     try {
-      final v = item['images']['fixed_height']['url']; // Giphy
+      final v = item['images']['fixed_height']['url'];
       if (v is String && v.startsWith('http')) return v;
     } catch (_) {}
     try {
-      final v = item['media_formats']['gif']['url']; // Tenor v2
+      final v = item['media_formats']['gif']['url'];
       if (v is String && v.startsWith('http')) return v;
     } catch (_) {}
     return null;
@@ -2467,7 +2487,8 @@ class _GifSearchSheetState extends State<_GifSearchSheet> {
     final height = MediaQuery.of(context).size.height * 0.7;
 
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
         height: height,
         decoration: const BoxDecoration(
