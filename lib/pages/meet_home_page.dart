@@ -3,7 +3,7 @@
 // (.txt olarak verildi. Projeye eklerken adını meet_home_page.dart yapın.)
 //
 // Gettic Meet ana ekranı:
-//  - Kişiler: sohbet geçmişindeki bireysel kişiler, sesli/görüntülü arama
+//  - Arama kutusu (son aramalarda isme göre süz)
 //  - Son aramalar: gelen/giden, cevaplanan/cevapsız, tekrar ara
 // ============================================================
 
@@ -31,7 +31,6 @@ class _MeetHomePageState extends State<MeetHomePage> {
   bool _loading = true;
   String _query = '';
   String? _error;
-  List<Map<String, dynamic>> _contacts = [];
   List<Map<String, dynamic>> _history = [];
   final Map<String, String> _names = {};
 
@@ -52,21 +51,6 @@ class _MeetHomePageState extends State<MeetHomePage> {
     });
 
     try {
-      // Kişiler: bireysel sohbetlerdeki karşı taraflar (tekrar edenler çıkarılır)
-      final convs = await _service.getMyConversationsWithUnread();
-      final contacts = <Map<String, dynamic>>[];
-      final seen = <String>{};
-      for (final c in convs) {
-        if (c['is_group'] == true) continue;
-        final u = c['other_user'];
-        if (u == null) continue;
-        final id = u['id'].toString();
-        if (seen.add(id)) {
-          contacts.add({'id': id, 'username': (u['username'] ?? '').toString()});
-          _names[id] = (u['username'] ?? '').toString();
-        }
-      }
-
       // Son aramalar
       final rows = await _sb
           .from('meet_invites')
@@ -95,7 +79,6 @@ class _MeetHomePageState extends State<MeetHomePage> {
 
       if (!mounted) return;
       setState(() {
-        _contacts = contacts;
         _history = history;
         _loading = false;
       });
@@ -116,8 +99,6 @@ class _MeetHomePageState extends State<MeetHomePage> {
   bool _matches(String name) =>
       _query.isEmpty || name.toLowerCase().contains(_query.toLowerCase());
 
-  List<Map<String, dynamic>> get _filteredContacts =>
-      _contacts.where((ct) => _matches(ct['username'] as String)).toList();
 
   List<Map<String, dynamic>> get _filteredHistory =>
       _history.where((h) => _matches(_nameOf(_otherIdOf(h)))).toList();
@@ -179,14 +160,6 @@ class _MeetHomePageState extends State<MeetHomePage> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      _sectionTitle('Kişiler', c),
-                      if (_contacts.isEmpty)
-                        _empty('Henüz kişi yok. Önce bir sohbet başlatın.', c)
-                      else if (_filteredContacts.isEmpty)
-                        _empty('Eşleşen kişi yok.', c)
-                      else
-                        for (final ct in _filteredContacts) _contactTile(ct, c),
-                      const SizedBox(height: 20),
                       _sectionTitle('Son aramalar', c),
                       if (_history.isEmpty)
                         _empty('Henüz arama yok.', c)
@@ -218,40 +191,6 @@ class _MeetHomePageState extends State<MeetHomePage> {
         child: Text(t, style: TextStyle(color: c.textSecondary)),
       );
 
-  Widget _contactTile(Map<String, dynamic> ct, AppColors c) {
-    final name = ct['username'] as String;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: c.border),
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: c.primary,
-          child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        ),
-        title: Text(name, style: TextStyle(color: c.textPrimary, fontWeight: FontWeight.w600)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: 'Sesli ara',
-              icon: Icon(Icons.call_outlined, color: c.primary),
-              onPressed: () => _call(ct['id'] as String, video: false),
-            ),
-            IconButton(
-              tooltip: 'Görüntülü ara',
-              icon: Icon(Icons.videocam_outlined, color: c.primary),
-              onPressed: () => _call(ct['id'] as String, video: true),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _historyTile(Map<String, dynamic> h, AppColors c) {
     final me = _me;
