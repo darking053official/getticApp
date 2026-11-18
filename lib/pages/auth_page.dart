@@ -616,79 +616,30 @@ class _AuthPageState extends State<AuthPage> {
 
   // ---------- Arka plan (yumuşak mor ışıltılar) ----------
   Widget _buildBackground(AppColors c, bool isDark) {
-    Widget glow(Color color, double size, double opacity) {
-      return Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color.withOpacity(opacity), color.withOpacity(0)],
-          ),
-        ),
-      );
-    }
-
-    return IgnorePointer(
-      child: Stack(
-        children: [
-          Positioned(
-            top: -140,
-            left: -100,
-            child: glow(c.primary, 380, isDark ? 0.30 : 0.16),
-          ),
-          Positioned(
-            bottom: -160,
-            right: -120,
-            child: glow(const Color(0xFF4F46E5), 420, isDark ? 0.20 : 0.10),
-          ),
-        ],
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
   // ---------- Logo + başlık ----------
   Widget _buildBrand(AppColors c) {
     return Column(
       children: [
-        Container(
-          width: 92,
-          height: 92,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: c.surface,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: c.border),
-            boxShadow: [
-              BoxShadow(
-                color: c.primary.withOpacity(0.35),
-                blurRadius: 28,
-                spreadRadius: 1,
-              ),
-            ],
-          ),
-          child: Image.asset(
-            'assets/logo.png',
-            errorBuilder: (_, __, ___) =>
-                Icon(Icons.message_rounded, color: c.primary, size: 44),
+        Image.asset(
+          'assets/logo.png',
+          width: 72,
+          height: 72,
+          errorBuilder: (_, __, ___) =>
+              Icon(Icons.message_rounded, color: c.primary, size: 56),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'Gettic',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w700,
+            color: c.textPrimary,
           ),
         ),
-        const SizedBox(height: 18),
-        ShaderMask(
-          shaderCallback: (rect) => LinearGradient(
-            colors: [c.textPrimary, c.primary],
-          ).createShader(rect),
-          child: const Text(
-            'Gettic',
-            style: TextStyle(
-              fontSize: 38,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              letterSpacing: -1.2,
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Text(
           'Gizlilik odaklı mesajlaşma',
           style: TextStyle(color: c.textSecondary, fontSize: 13),
@@ -705,13 +656,6 @@ class _AuthPageState extends State<AuthPage> {
         color: c.surface,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: c.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.35 : 0.06),
-            blurRadius: 30,
-            offset: const Offset(0, 12),
-          ),
-        ],
       ),
       child: AutofillGroup(
         child: Column(
@@ -921,20 +865,8 @@ class _AuthPageState extends State<AuthPage> {
               heightFactor: 1,
               child: Container(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      c.primary,
-                      Color.lerp(c.primary, const Color(0xFF4F46E5), 0.5)!,
-                    ],
-                  ),
+                  color: c.primary,
                   borderRadius: BorderRadius.circular(10),
-                  boxShadow: [
-                    BoxShadow(
-                      color: c.primary.withOpacity(0.35),
-                      blurRadius: 10,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
                 ),
               ),
             ),
@@ -1248,22 +1180,8 @@ class _AuthPageState extends State<AuthPage> {
         color: Colors.transparent,
         child: Ink(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                c.primary,
-                Color.lerp(c.primary, const Color(0xFF4F46E5), 0.55)!,
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            color: c.primary,
             borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                color: c.primary.withOpacity(0.35),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(14),
