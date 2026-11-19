@@ -137,6 +137,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   Timer? _typingDebounce;
   Timer? _recordTimer;
   Timer? _markReadDebounce;
+  Timer? _readPoll;
 
   // Storage path -> imzalı URL önbelleği
   final Map<String, _CachedUrl> _urlCache = {};
@@ -171,6 +172,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     _subscribeToTyping();
     _subscribeToReads();
     _refreshOtherReadAt();
+    _readPoll = Timer.periodic(
+        const Duration(seconds: 15), (_) => _refreshOtherReadAt());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _markRead());
     _setupScrollListener();
     WidgetsBinding.instance.addObserver(this);
     _loadDraft();
@@ -283,8 +287,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   void _markRead() {
     if (!_isForeground) return;
     if (_markReadDebounce?.isActive ?? false) return;
-    _service.markConversationRead(widget.conversationId);
     _markReadDebounce = Timer(const Duration(seconds: 1), () {});
+    _service
+        .markConversationRead(widget.conversationId)
+        .then((_) => _refreshOtherReadAt());
   }
 
   // ==========================================
@@ -331,7 +337,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         if (!mounted) return;
         setState(() => _isOtherTyping = true);
         _typingTimer?.cancel();
-        _typingTimer = Timer(const Duration(seconds: 3), () {
+        _typingTimer = Timer(const Duration(seconds: 4), () {
           if (mounted) setState(() => _isOtherTyping = false);
         });
       },
@@ -339,12 +345,17 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   }
 
   /// Input bar'daki TextField'ın onChanged'ine bağlı.
+  DateTime? _lastTypingSent;
+
+  /// Yazarken her 2 saniyede bir "yazıyor" olayı gönderir (duraklamayı beklemez).
   void _onTyping(String text) {
-    if (text.isEmpty) return;
-    _typingDebounce?.cancel();
-    _typingDebounce = Timer(const Duration(milliseconds: 500), () {
+    if (text.trim().isEmpty) return;
+    final now = DateTime.now();
+    if (_lastTypingSent == null ||
+        now.difference(_lastTypingSent!) > const Duration(seconds: 2)) {
+      _lastTypingSent = now;
       _sendTypingEvent();
-    });
+    }
   }
 
   Future<void> _sendTypingEvent() async {
@@ -438,6 +449,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _isSending) return;
+    _lastTypingSent = null;
 
     final reply = _replyTo;
     _controller.clear();
@@ -1070,6 +1082,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     _controller.removeListener(_onDraftChanged);
     _draftTimer?.cancel();
     _markReadDebounce?.cancel();
+    _readPoll?.cancel();
+    // Sohbetten çıkarken okundu yaz (liste sayacı hemen düşsün)
+    unawaited(_service.markConversationRead(widget.conversationId));
     unawaited(_persistDraft(_controller.text));
     _inputFocus.dispose();
     AppState().clearActiveConversation();
@@ -1137,26 +1152,25 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
           if (_isOtherTyping)
             Padding(
-              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppTheme.inputBorder),
-                  ),
-                  child: const Text(
-                    'yazıyor...',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 13,
-                      fontStyle: FontStyle.italic,
+              padding: const EdgeInsets.only(left: 12, bottom: 6),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(18),
                     ),
+                    child: const _TypingDots(),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${widget.otherUser.username} yazıyor',
+                    style: const TextStyle(
+                        color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                ],
               ),
             ),
 
@@ -2595,6 +2609,63 @@ class _GifSearchSheetState extends State<_GifSearchSheet> {
                     color: Colors.white54),
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ============================================================
+// "YAZIYOR" ANİMASYONU (üç nokta)
+// ============================================================
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, __) {
+        Widget dot(int i) {
+          final t = (_c.value - i * 0.2) % 1.0;
+          final lift = (t < 0.5 ? t : 1 - t) * 2;
+          return Transform.translate(
+            offset: Offset(0, -4 * lift),
+            child: Container(
+              width: 7,
+              height: 7,
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withOpacity(0.4 + 0.6 * lift),
+                shape: BoxShape.circle,
+              ),
+            ),
+          );
+        }
+
+        return SizedBox(
+          height: 14,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [dot(0), dot(1), dot(2)],
           ),
         );
       },
