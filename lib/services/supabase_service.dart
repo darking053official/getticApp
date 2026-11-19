@@ -428,14 +428,15 @@ class SupabaseService {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
     if (content.trim().isEmpty) throw Exception('Boş mesaj gönderilemez');
 
-    await _client.from(AppConstants.tableMessages).insert({
+    final inserted = await _client.from(AppConstants.tableMessages).insert({
       'conversation_id': conversationId,
       'sender_id': currentUser!.id,
       'content': content.trim(),
       'type': 'text',
       if (replyToId != null) 'reply_to': replyToId,
-    });
+    }).select('id').single();
 
+    _pushMessage(conversationId, inserted['id'].toString());
     _touchConversation(conversationId);
   }
 
@@ -449,16 +450,25 @@ class SupabaseService {
   }) async {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
 
-    await _client.from(AppConstants.tableMessages).insert({
+    final inserted = await _client.from(AppConstants.tableMessages).insert({
       'conversation_id': conversationId,
       'sender_id': currentUser!.id,
       'content': content?.trim() ?? '',
       'type': type,
       'media_url': mediaPath,
       if (replyToId != null) 'reply_to': replyToId,
-    });
+    }).select('id').single();
 
+    _pushMessage(conversationId, inserted['id'].toString());
     _touchConversation(conversationId);
+  }
+
+  /// Alıcılara OneSignal push gönderir (uygulama kapalıyken de bildirim gelsin).
+  void _pushMessage(String conversationId, String messageId) {
+    _client.functions.invoke('message-push', body: {
+      'conversationId': conversationId,
+      'messageId': messageId,
+    }).then((_) {}, onError: (e) => print('Push hatası: $e'));
   }
 
   void _touchConversation(String conversationId) {
