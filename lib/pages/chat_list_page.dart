@@ -22,6 +22,8 @@ import '../models/profile.dart';
 import '../services/notification_service.dart';
 import '../services/supabase_service.dart';
 import 'chat_room_page.dart';
+import 'new_group_page.dart';
+import '../services/chat_lock_service.dart';
 import 'settings_page.dart';
 
 const String _kProfilesTable = 'profiles';
@@ -57,6 +59,7 @@ class _ChatListPageState extends State<ChatListPage>
   List<Map<String, dynamic>> _all = [];
   Set<String> _pinnedIds = {};
   Set<String> _archivedIds = {};
+  Set<String> _lockedIds = {};
 
   // Türetilmiş veri (yalnızca _rebuildView içinde hesaplanır)
   List<Map<String, dynamic>> _view = [];
@@ -117,6 +120,7 @@ class _ChatListPageState extends State<ChatListPage>
     }
 
     await _loadPrefs();
+    _lockedIds = await ChatLock.instance.lockedIds();
     _subscribeRealtime();
     await _load(silent: _all.isNotEmpty);
   }
@@ -411,13 +415,19 @@ class _ChatListPageState extends State<ChatListPage>
   // EYLEMLER
   // ==========================================
   Future<void> _newChat() async {
-    final user = await showModalBottomSheet<Profile>(
+    final result = await showModalBottomSheet<Object>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => const UserSearchSheet(),
     );
-    if (user == null || !mounted) return;
+    if (!mounted || result == null) return;
+    if (result == 'group') {
+      await _newGroup();
+      return;
+    }
+    if (result is! Profile) return;
+    final user = result;
 
     try {
       final convId = await _service.createConversation(user.id);
@@ -433,8 +443,25 @@ class _ChatListPageState extends State<ChatListPage>
     }
   }
 
-  void _openChat(Map<String, dynamic> item, dynamic otherUser) {
+  /// Yeni grup oluşturma ekranını açar. Dönünce listeyi yenileyip Gruplar sekmesine geçer.
+  Future<void> _newGroup() async {
+    final convId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const NewGroupPage()),
+    );
+    if (!mounted) return;
+    if (convId != null) {
+      _snack('Grup oluşturuldu');
+      if (_tabController.index != 1) _tabController.animateTo(1);
+    }
+    _scheduleReload();
+  }
+
+  Future<void> _openChat(Map<String, dynamic> item, dynamic otherUser) async {
     final id = _idOf(item);
+    // Kilitli sohbetse önce PIN iste
+    final unlocked = await ChatLock.instance.ensureUnlocked(context, id);
+    if (!unlocked || !mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -456,6 +483,29 @@ class _ChatListPageState extends State<ChatListPage>
       ChatListCache.instance.conversations = _all;
       _scheduleReload();
     });
+  }
+
+  /// Sohbeti kilitler/kilidini açar. İlk kilitte PIN oluşturulur.
+  Future<void> _toggleChatLock(Map<String, dynamic> conv) async {
+    final id = _idOf(conv);
+    final locked = _lockedIds.contains(id);
+    if (locked) {
+      final ok = await ChatLock.instance.askPin(context);
+      if (!ok || !mounted) return;
+      await ChatLock.instance.setLocked(id, false);
+      setState(() => _lockedIds.remove(id));
+      _snack('Sohbet kilidi kaldırıldı');
+    } else {
+      if (!await ChatLock.instance.hasPin()) {
+        final created = await ChatLock.instance.createPin(context);
+        if (!created || !mounted) return;
+      }
+      await ChatLock.instance.setLocked(id, true);
+      if (!mounted) return;
+      setState(() => _lockedIds.add(id));
+      _snack('Sohbet kilitlendi');
+    }
+    setState(_rebuildView);
   }
 
   void _togglePin(String id) {
@@ -611,6 +661,21 @@ class _ChatListPageState extends State<ChatListPage>
                   _markConversationRead(conv);
                 },
               ),
+            ListTile(
+              leading: Icon(
+                _lockedIds.contains(id) ? Icons.lock_open : Icons.lock_outline,
+                color: c.primary,
+              ),
+              title: Text(
+                  _lockedIds.contains(id)
+                      ? 'Sohbet kilidini kaldır'
+                      : 'Sohbeti kilitle',
+                  style: TextStyle(color: c.textPrimary)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _toggleChatLock(conv);
+              },
+            ),
             ListTile(
               leading: Icon(
                 isArchived ? Icons.unarchive_outlined : Icons.archive_outlined,
@@ -1000,7 +1065,9 @@ class _ChatListPageState extends State<ChatListPage>
       return _buildMessageState(c,
           icon: Icons.groups_outlined,
           title: 'Henüz grup yok',
-          subtitle: 'Grup sohbetleri burada görünecek.');
+          subtitle: 'Grup sohbetleri burada görünecek.',
+          actionLabel: 'Grup oluştur',
+          onAction: _newGroup);
     }
     return _buildMessageState(c,
         icon: Icons.chat_bubble_outline,
@@ -1076,6 +1143,7 @@ class _ChatListPageState extends State<ChatListPage>
   }
 
   Widget _buildConversationTile(AppColors c, Map<String, dynamic> item) {
+    if (item['is_group'] == true) return _buildGroupTile(c, item);
     final otherUser = item['other_user'];
     if (otherUser == null) return const SizedBox.shrink();
 
@@ -1198,14 +1266,19 @@ class _ChatListPageState extends State<ChatListPage>
               padding: const EdgeInsets.only(top: 4),
               child: Row(
                 children: [
-                  if (previewIcon != null) ...[
+                  if (_lockedIds.contains(id)) ...[
+                    Icon(Icons.lock, size: 14, color: subtitleColor),
+                    const SizedBox(width: 4),
+                  ] else if (previewIcon != null) ...[
                     Icon(previewIcon, size: 16, color: subtitleColor),
                     const SizedBox(width: 4),
                   ],
                   Expanded(
                     child: Text(
-                      (isMineLast && !deleted ? 'Sen: ' : '') +
-                          _previewText(lastMsg),
+                      (_lockedIds.contains(id)
+                              ? 'Kilitli sohbet'
+                              : (isMineLast && !deleted ? 'Sen: ' : '') +
+                                  _previewText(lastMsg)),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -1259,6 +1332,70 @@ class _ChatListPageState extends State<ChatListPage>
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// Grup satırı: grup adı ve son mesaj. Grup sohbet ekranı henüz yok.
+  Widget _buildGroupTile(AppColors c, Map<String, dynamic> item) {
+    final id = _idOf(item);
+    final unread = (item['unread_count'] as int?) ?? 0;
+    final name = (item['group_name'] ?? 'Grup').toString();
+    final lastMsg = item['last_message'];
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: unread > 0 ? c.surface : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          onTap: () => _snack('Grup sohbeti yakında açılacak'),
+          onLongPress: () => _showConversationMenu(item),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          leading: CircleAvatar(
+            radius: 28,
+            backgroundColor: c.primary,
+            child: const Icon(Icons.groups, color: Colors.white),
+          ),
+          title: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: c.textPrimary,
+              fontWeight: unread > 0 ? FontWeight.bold : FontWeight.w600,
+              fontSize: 16,
+            ),
+          ),
+          subtitle: Text(
+            _previewText(lastMsg),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: c.textSecondary, fontSize: 14),
+          ),
+          trailing: unread > 0
+              ? Container(
+                  constraints: const BoxConstraints(minWidth: 22),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: c.primary,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    unread > 99 ? '99+' : '$unread',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold),
+                  ),
+                )
+              : null,
         ),
       ),
     );
@@ -1424,6 +1561,18 @@ class _UserSearchSheetState extends State<UserSearchSheet> {
                 ),
               ),
             ),
+            ListTile(
+              onTap: () => Navigator.pop(context, 'group'),
+              leading: CircleAvatar(
+                backgroundColor: c.primary,
+                child: const Icon(Icons.group_add, color: Colors.white),
+              ),
+              title: Text('Yeni grup',
+                  style: TextStyle(
+                      color: c.textPrimary, fontWeight: FontWeight.w600)),
+              trailing: Icon(Icons.chevron_right, color: c.textSecondary),
+            ),
+            Divider(height: 1, color: c.border),
             Padding(
               padding: const EdgeInsets.all(12),
               child: TextField(
