@@ -188,8 +188,7 @@ class _ChatListPageState extends State<ChatListPage>
   void _onMessageChange(PostgresChangePayload payload) {
     if (!mounted) return;
     if (payload.eventType == PostgresChangeEvent.insert) {
-      _notifyIfNeeded(payload.newRecord);
-      if (_applyInsert(payload.newRecord)) return;
+      if (_applyInsert(payload.newRecord)) return; // bildirim: sunucu push'u gönderir
     }
     _scheduleReload();
   }
@@ -435,6 +434,7 @@ class _ChatListPageState extends State<ChatListPage>
   }
 
   void _openChat(Map<String, dynamic> item, dynamic otherUser) {
+    final id = _idOf(item);
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -443,7 +443,19 @@ class _ChatListPageState extends State<ChatListPage>
           otherUser: Profile.fromJson(Map<String, dynamic>.from(otherUser)),
         ),
       ),
-    ).then((_) => _scheduleReload());
+    ).then((_) {
+      // Sohbetten dönünce sayacı hemen sıfırla, sonra sunucudan doğrula
+      if (!mounted) return;
+      setState(() {
+        _all = _all.map((c) {
+          if (_idOf(c) != id) return c;
+          return Map<String, dynamic>.from(c)..['unread_count'] = 0;
+        }).toList();
+        _rebuildView();
+      });
+      ChatListCache.instance.conversations = _all;
+      _scheduleReload();
+    });
   }
 
   void _togglePin(String id) {
