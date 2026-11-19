@@ -131,8 +131,8 @@ jobs:
       - name: Bildirim sesi ve klavye ayarını ekle
         run: |
           mkdir -p android/app/src/main/res/raw
-          cp assets/notification.ogg android/app/src/main/res/raw/notification.ogg
-          cp assets/ringtone.ogg android/app/src/main/res/raw/ringtone.ogg
+          [ -f assets/notification.ogg ] && cp assets/notification.ogg android/app/src/main/res/raw/notification.ogg || echo "::warning::assets/notification.ogg bulunamadı"
+          [ -f assets/ringtone.ogg ] && cp assets/ringtone.ogg android/app/src/main/res/raw/ringtone.ogg || echo "::warning::assets/ringtone.ogg bulunamadı"
           python3 - << 'PY'
           m = 'android/app/src/main/AndroidManifest.xml'
           s = open(m, encoding='utf-8').read()
@@ -167,7 +167,7 @@ jobs:
       - name: Çağrı zil sesini Android'e ekle
         run: |
           mkdir -p android/app/src/main/res/raw
-          cp assets/ringtone.ogg android/app/src/main/res/raw/ringtone.ogg
+          [ -f assets/ringtone.ogg ] && cp assets/ringtone.ogg android/app/src/main/res/raw/ringtone.ogg || echo "::warning::assets/ringtone.ogg bulunamadı"
 
       - name: Bağımlılıkları getir
         run: flutter pub get
