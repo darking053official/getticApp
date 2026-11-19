@@ -485,6 +485,26 @@ class _ChatListPageState extends State<ChatListPage>
     });
   }
 
+  /// Grup sohbetini açar (kilit kontrolüyle).
+  Future<void> _openGroup(Map<String, dynamic> item) async {
+    final id = _idOf(item);
+    final unlocked = await ChatLock.instance.ensureUnlocked(context, id);
+    if (!unlocked || !mounted) return;
+    final name = (item['group_name'] ?? 'Grup').toString();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatRoomPage(
+          conversationId: id,
+          otherUser: Profile(id: id, username: name),
+          isGroup: true,
+          groupName: name,
+          groupCreatedBy: item['created_by']?.toString(),
+        ),
+      ),
+    ).then((_) => _scheduleReload());
+  }
+
   /// Sohbeti kilitler/kilidini açar. İlk kilitte PIN oluşturulur.
   Future<void> _toggleChatLock(Map<String, dynamic> conv) async {
     final id = _idOf(conv);
@@ -1351,7 +1371,7 @@ class _ChatListPageState extends State<ChatListPage>
         borderRadius: BorderRadius.circular(16),
         clipBehavior: Clip.antiAlias,
         child: ListTile(
-          onTap: () => _snack('Grup sohbeti yakında açılacak'),
+          onTap: () => _openGroup(item),
           onLongPress: () => _showConversationMenu(item),
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
