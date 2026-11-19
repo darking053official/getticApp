@@ -424,7 +424,7 @@ class SupabaseService {
 
   /// Metin mesajı gönderir
   Future<void> sendMessage(String conversationId, String content,
-      {String? replyToId}) async {
+      {String? replyToId, bool forwarded = false}) async {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
     if (content.trim().isEmpty) throw Exception('Boş mesaj gönderilemez');
 
@@ -433,6 +433,7 @@ class SupabaseService {
       'sender_id': currentUser!.id,
       'content': content.trim(),
       'type': 'text',
+      'forwarded': forwarded,
       if (replyToId != null) 'reply_to': replyToId,
     }).select('id').single();
 
@@ -447,6 +448,7 @@ class SupabaseService {
     required String mediaPath,
     String? content,
     String? replyToId,
+    bool forwarded = false,
   }) async {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
 
@@ -455,12 +457,92 @@ class SupabaseService {
       'sender_id': currentUser!.id,
       'content': content?.trim() ?? '',
       'type': type,
+      'forwarded': forwarded,
       'media_url': mediaPath,
       if (replyToId != null) 'reply_to': replyToId,
     }).select('id').single();
 
     _pushMessage(conversationId, inserted['id'].toString());
     _touchConversation(conversationId);
+  }
+
+  // ==========================================
+  // PARTİ 1: TEPKİLER, SABİTLEME, İLETME
+  // ==========================================
+
+  /// Verilen mesajların tepkilerini getirir: message_id, user_id, emoji.
+  Future<List<Map<String, dynamic>>> getReactions(List<String> messageIds) async {
+    if (messageIds.isEmpty) return [];
+    try {
+      final data = await _client
+          .from('message_reactions')
+          .select('message_id, user_id, emoji')
+          .inFilter('message_id', messageIds);
+      return List<Map<String, dynamic>>.from(data);
+    } catch (e) {
+      print('Tepki çekme hatası: $e');
+      return [];
+    }
+  }
+
+  /// Tepkiyi açar/kapatır. Zaten verdiysem geri alır.
+  Future<void> toggleReaction(String messageId, String emoji) async {
+    final me = currentUser?.id;
+    if (me == null) return;
+    final existing = await _client
+        .from('message_reactions')
+        .select('message_id')
+        .eq('message_id', messageId)
+        .eq('user_id', me)
+        .eq('emoji', emoji)
+        .maybeSingle();
+    if (existing != null) {
+      await _client
+          .from('message_reactions')
+          .delete()
+          .eq('message_id', messageId)
+          .eq('user_id', me)
+          .eq('emoji', emoji);
+    } else {
+      await _client.from('message_reactions').insert({
+        'message_id': messageId,
+        'user_id': me,
+        'emoji': emoji,
+      });
+    }
+  }
+
+  /// Sohbetin sabitlenen mesajının id'si (yoksa null).
+  Future<String?> getPinnedMessageId(String conversationId) async {
+    final row = await _client
+        .from(AppConstants.tableConversations)
+        .select('pinned_message_id')
+        .eq('id', conversationId)
+        .maybeSingle();
+    return row?['pinned_message_id']?.toString();
+  }
+
+  /// Sabitlenen mesajı ayarlar. null verilirse sabitleme kaldırılır.
+  Future<void> setPinnedMessage(String conversationId, String? messageId) async {
+    await _client
+        .from(AppConstants.tableConversations)
+        .update({'pinned_message_id': messageId})
+        .eq('id', conversationId);
+  }
+
+  /// Mesajı başka bir sohbete iletir. İletildi işaretlenir.
+  Future<void> forwardMessage(String targetConversationId, Message m) async {
+    if (m.type == 'text') {
+      await sendMessage(targetConversationId, m.content ?? '', forwarded: true);
+    } else {
+      await sendMediaMessage(
+        conversationId: targetConversationId,
+        type: m.type,
+        mediaPath: m.mediaUrl ?? '',
+        content: m.content,
+        forwarded: true,
+      );
+    }
   }
 
   /// Alıcılara OneSignal push gönderir (uygulama kapalıyken de bildirim gelsin).
