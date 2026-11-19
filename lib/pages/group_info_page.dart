@@ -1,13 +1,29 @@
+// ============================================================
+// lib/pages/group_info_page.dart
+// (.txt olarak verildi. Projeye eklerken adını group_info_page.dart yapın.)
+// Grup bilgileri: ad, üyeler, üye ekle/çıkar (yönetici), gruptan ayrıl.
+// Geri dönüş değeri: yeni grup adı (String), gruptan ayrıldıysa '__left__'.
+// ============================================================
+
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/theme.dart';
 import '../models/profile.dart';
 import '../services/supabase_service.dart';
-import '../models/conversation.dart';
+
+const String kGroupLeft = '__left__';
 
 class GroupInfoPage extends StatefulWidget {
-  final Conversation conversation;
-  const GroupInfoPage({super.key, required this.conversation});
+  final String conversationId;
+  final String groupName;
+  final String? createdBy;
+
+  const GroupInfoPage({
+    super.key,
+    required this.conversationId,
+    required this.groupName,
+    this.createdBy,
+  });
 
   @override
   State<GroupInfoPage> createState() => _GroupInfoPageState();
@@ -15,124 +31,111 @@ class GroupInfoPage extends StatefulWidget {
 
 class _GroupInfoPageState extends State<GroupInfoPage> {
   final _service = SupabaseService();
-  final _groupNameController = TextEditingController();
-  
+  late final TextEditingController _nameController =
+      TextEditingController(text: widget.groupName);
+
+  late String _currentName = widget.groupName;
   List<Profile> _members = [];
   bool _isLoading = true;
-  bool _isAdmin = false;
   bool _isSaving = false;
+
+  String? get _myId => _service.currentUser?.id;
+  bool get _isAdmin => widget.createdBy != null && widget.createdBy == _myId;
 
   @override
   void initState() {
     super.initState();
-    _groupNameController.text = widget.conversation.name ?? 'Grup';
     _loadMembers();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadMembers() async {
     try {
-      // Üyeleri yükle
-      final data = await _service.getGroupMembers(widget.conversation.id);
-      final myId = _service.currentUser?.id;
-      
-      if (mounted) {
-        setState(() {
-          _members = data;
-          // Basit admin kontrolü: Sohbeti oluşturan admin kabul edilir
-          _isAdmin = widget.conversation.createdBy == myId;
-          _isLoading = false;
-        });
-      }
+      final data = await _service.getGroupMembers(widget.conversationId);
+      if (!mounted) return;
+      setState(() {
+        _members = data;
+        _isLoading = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _snack('Üyeler yüklenemedi: $e', isError: true);
-      }
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _snack('Üyeler yüklenemedi: $e', isError: true);
     }
   }
 
-  Future<void> _updateGroupName() async {
-    final newName = _groupNameController.text.trim();
-    if (newName.isEmpty || newName == widget.conversation.name) return;
-
+  Future<void> _saveName() async {
+    final newName = _nameController.text.trim();
+    if (newName.isEmpty || newName == _currentName) return;
     setState(() => _isSaving = true);
     try {
-      await _service.updateGroupName(widget.conversation.id, newName);
-      if (mounted) {
-        _snack('Grup adı güncellendi');
-        setState(() => _isSaving = false);
-      }
+      await _service.updateGroupName(widget.conversationId, newName);
+      if (!mounted) return;
+      setState(() => _currentName = newName);
+      _snack('Grup adı güncellendi');
     } catch (e) {
-      if (mounted) {
-        setState(() => _isSaving = false);
-        _snack('Hata: $e', isError: true);
-      }
+      _snack('Hata: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   Future<void> _leaveGroup() async {
-    final c = await _confirm(
-      title: 'Gruptan Ayrıl',
+    final ok = await _confirm(
+      title: 'Gruptan ayrıl',
       content: 'Bu gruptan ayrılmak istediğine emin misin?',
       confirm: 'Ayrıl',
       isDanger: true,
     );
-    if (c != true) return;
-
+    if (ok != true || _myId == null) return;
     try {
-      final myId = _service.currentUser?.id;
-      if (myId == null) return;
-      
-      await _service.removeGroupMember(widget.conversation.id, myId);
-      if (mounted) {
-        Navigator.pop(context); // Grup bilgilerinden çık
-        Navigator.pop(context); // Sohbet odasından çık
-      }
+      await _service.removeGroupMember(widget.conversationId, _myId!);
+      if (!mounted) return;
+      Navigator.pop(context, kGroupLeft);
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
   }
 
   Future<void> _removeMember(Profile member) async {
-    final c = await _confirm(
-      title: 'Üyeyi Çıkar',
-      content: '${member.username} adlı kullanıcıyı gruptan çıkarmak istediğine emin misin?',
+    final ok = await _confirm(
+      title: 'Üyeyi çıkar',
+      content: '${member.username} gruptan çıkarılsın mı?',
       confirm: 'Çıkar',
       isDanger: true,
     );
-    if (c != true) return;
-
+    if (ok != true) return;
     try {
-      await _service.removeGroupMember(widget.conversation.id, member.id);
-      await _loadMembers();
+      await _service.removeGroupMember(widget.conversationId, member.id);
       _snack('${member.username} gruptan çıkarıldı');
+      await _loadMembers();
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
   }
 
   Future<void> _addMember() async {
-    final selectedUsers = await showModalBottomSheet<List<Profile>>(
+    final selected = await showModalBottomSheet<List<Profile>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _AddMemberSheet(
-        groupId: widget.conversation.id,
+      builder: (_) => _AddMemberSheet(
         existingMemberIds: _members.map((m) => m.id).toList(),
       ),
     );
-
-    if (selectedUsers != null && selectedUsers.isNotEmpty) {
-      try {
-        await _service.addGroupMembers(
-          widget.conversation.id, 
-          selectedUsers.map((u) => u.id).toList()
-        );
-        await _loadMembers();
-        _snack('${selectedUsers.length} üye eklendi');
-      } catch (e) {
-        _snack('Hata: $e', isError: true);
-      }
+    if (selected == null || selected.isEmpty) return;
+    try {
+      await _service.addGroupMembers(
+          widget.conversationId, selected.map((u) => u.id).toList());
+      _snack('${selected.length} üye eklendi');
+      await _loadMembers();
+    } catch (e) {
+      _snack('Hata: $e', isError: true);
     }
   }
 
@@ -158,15 +161,19 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
       builder: (c) => AlertDialog(
         backgroundColor: AppTheme.surface,
         title: Text(title, style: const TextStyle(color: AppTheme.textPrimary)),
-        content: Text(content, style: const TextStyle(color: AppTheme.textSecondary)),
+        content: Text(content,
+            style: const TextStyle(color: AppTheme.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
-            child: const Text('İptal', style: TextStyle(color: AppTheme.textSecondary)),
+            child: const Text('İptal',
+                style: TextStyle(color: AppTheme.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: Text(confirm, style: TextStyle(color: isDanger ? Colors.redAccent : AppTheme.primary)),
+            child: Text(confirm,
+                style: TextStyle(
+                    color: isDanger ? Colors.redAccent : AppTheme.primary)),
           ),
         ],
       ),
@@ -174,199 +181,186 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
   }
 
   @override
-  void dispose() {
-    _groupNameController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (!didPop) Navigator.pop(context, _currentName);
+      },
+      child: Scaffold(
         backgroundColor: AppTheme.background,
-        body: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('Grup Bilgileri'),
-        backgroundColor: AppTheme.background,
-        elevation: 0,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        children: [
-          // --- GRUP AVATARI VE ADI ---
-          Center(
-            child: Stack(
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.groups, size: 50, color: Colors.white),
-                ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppTheme.background, width: 2),
-                    ),
-                    child: const Icon(Icons.camera_alt, size: 16, color: AppTheme.textSecondary),
-                  ),
-                ),
-              ],
-            ),
+        appBar: AppBar(
+          title: const Text('Grup bilgileri'),
+          backgroundColor: AppTheme.background,
+          elevation: 0,
+          leading: BackButton(
+            onPressed: () => Navigator.pop(context, _currentName),
           ),
-          const SizedBox(height: 16),
-          
-          if (_isAdmin)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: TextField(
-                controller: _groupNameController,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
-                decoration: const InputDecoration(
-                  hintText: 'Grup Adı',
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: Border.all(color: AppTheme.primary, width: 2),
-                ),
-                onSubmitted: (_) => _updateGroupName(),
-              ),
-            )
-          else
-            Center(
-              child: Text(
-                widget.conversation.name ?? 'Grup',
-                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
-              ),
-            ),
-          
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              '${_members.length} üye',
-              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-            ),
-          ),
-          
-          if (_isSaving)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(8.0),
-                child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-            ),
-
-          const SizedBox(height: 24),
-
-          // --- ÜYELER ---
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Üyeler',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
-                ),
-                if (_isAdmin)
-                  TextButton.icon(
-                    onPressed: _addMember,
-                    icon: const Icon(Icons.add, size: 16),
-                    label: const Text('Ekle'),
-                    style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
-                  ),
-              ],
-            ),
-          ),
-          
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _members.length,
-            itemBuilder: (context, index) {
-              final member = _members[index];
-              final isMe = member.id == _service.currentUser?.id;
-              final isCreator = member.id == widget.conversation.createdBy;
-
-              return ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: AppTheme.primary,
-                  backgroundImage: member.avatarUrl != null
-                      ? CachedNetworkImageProvider(member.avatarUrl!)
-                      : null,
-                  child: member.avatarUrl == null
-                      ? Text(member.username[0].toUpperCase(), style: const TextStyle(color: Colors.white))
-                      : null,
-                ),
-                title: Row(
-                  children: [
-                    Text(
-                      member.username + (isMe ? ' (Sen)' : ''),
-                      style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w500),
-                    ),
-                    if (isCreator)
-                      const Padding(
-                        padding: EdgeInsets.only(left: 8.0),
-                        child: Text('Admin', style: TextStyle(color: AppTheme.primary, fontSize: 11, fontWeight: FontWeight.bold)),
+        ),
+        body: _isLoading
+            ? const Center(
+                child: CircularProgressIndicator(color: AppTheme.primary))
+            : ListView(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                children: [
+                  Center(
+                    child: Container(
+                      width: 96,
+                      height: 96,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.primary,
+                        shape: BoxShape.circle,
                       ),
-                  ],
-                ),
-                trailing: (_isAdmin && !isMe && !isCreator)
-                    ? IconButton(
-                        icon: const Icon(Icons.person_remove_outlined, color: Colors.redAccent),
-                        onPressed: () => _removeMember(member),
-                      )
-                    : null,
-              );
-            },
-          ),
-
-          const SizedBox(height: 24),
-
-          // --- GRUPTAN AYRILMA ---
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: ElevatedButton.icon(
-              onPressed: _leaveGroup,
-              icon: const Icon(Icons.exit_to_app),
-              label: const Text('Gruptan Ayrıl'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.redAccent.withOpacity(0.1),
-                foregroundColor: Colors.redAccent,
-                side: const BorderSide(color: Colors.redAccent, width: 1),
+                      child: const Icon(Icons.groups,
+                          size: 48, color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (_isAdmin)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: TextField(
+                        controller: _nameController,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textPrimary),
+                        decoration: const InputDecoration(
+                          hintText: 'Grup adı',
+                          border: InputBorder.none,
+                        ),
+                        onSubmitted: (_) => _saveName(),
+                      ),
+                    )
+                  else
+                    Center(
+                      child: Text(
+                        _currentName,
+                        style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textPrimary),
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  Center(
+                    child: Text(
+                      '${_members.length} üye',
+                      style: const TextStyle(
+                          color: AppTheme.textSecondary, fontSize: 14),
+                    ),
+                  ),
+                  if (_isSaving)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(8),
+                        child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2)),
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'ÜYELER',
+                          style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1),
+                        ),
+                        if (_isAdmin)
+                          TextButton.icon(
+                            onPressed: _addMember,
+                            icon: const Icon(Icons.person_add_alt_1, size: 18),
+                            label: const Text('Ekle'),
+                            style: TextButton.styleFrom(
+                                foregroundColor: AppTheme.primary),
+                          ),
+                      ],
+                    ),
+                  ),
+                  ..._members.map((member) {
+                    final isMe = member.id == _myId;
+                    final isCreator = member.id == widget.createdBy;
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: AppTheme.primary,
+                        backgroundImage: member.avatarUrl != null
+                            ? CachedNetworkImageProvider(member.avatarUrl!)
+                            : null,
+                        child: member.avatarUrl == null
+                            ? Text(member.initial,
+                                style: const TextStyle(color: Colors.white))
+                            : null,
+                      ),
+                      title: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              isMe ? '${member.username} (Sen)' : member.username,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                          if (isCreator)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 8),
+                              child: Text('Yönetici',
+                                  style: TextStyle(
+                                      color: AppTheme.primary,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                        ],
+                      ),
+                      trailing: (_isAdmin && !isMe && !isCreator)
+                          ? IconButton(
+                              tooltip: 'Gruptan çıkar',
+                              icon: const Icon(Icons.person_remove_outlined,
+                                  color: Colors.redAccent),
+                              onPressed: () => _removeMember(member),
+                            )
+                          : null,
+                    );
+                  }),
+                  const SizedBox(height: 24),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: OutlinedButton.icon(
+                      onPressed: _leaveGroup,
+                      icon: const Icon(Icons.exit_to_app),
+                      label: const Text('Gruptan ayrıl'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.redAccent,
+                        side: const BorderSide(color: Colors.redAccent),
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
               ),
-            ),
-          ),
-        ],
       ),
     );
   }
 }
 
-// ==========================================
-// ÜYE EKLEME MODALI
-// ==========================================
+// ============================================================
+// ÜYE EKLEME (çoklu seçim)
+// ============================================================
 class _AddMemberSheet extends StatefulWidget {
-  final String groupId;
   final List<String> existingMemberIds;
-
-  const _AddMemberSheet({
-    required this.groupId,
-    required this.existingMemberIds,
-  });
+  const _AddMemberSheet({required this.existingMemberIds});
 
   @override
   State<_AddMemberSheet> createState() => _AddMemberSheetState();
@@ -376,13 +370,29 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
   final _service = SupabaseService();
   final _searchController = TextEditingController();
   List<Profile> _results = [];
-  final Set<String> _selectedIds = {};
+  final Map<String, Profile> _selected = {};
   bool _isSearching = false;
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _search(String v) async {
+    if (v.trim().length < 2) {
+      setState(() => _results = []);
+      return;
+    }
+    setState(() => _isSearching = true);
+    final res = await _service.searchUsers(v);
+    if (!mounted) return;
+    setState(() {
+      _results = res
+          .where((u) => !widget.existingMemberIds.contains(u.id))
+          .toList();
+      _isSearching = false;
+    });
   }
 
   @override
@@ -394,20 +404,26 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.only(
-        top: 16, left: 16, right: 16,
+        top: 16,
+        left: 16,
+        right: 16,
         bottom: MediaQuery.of(context).viewInsets.bottom + 16,
       ),
       child: Column(
         children: [
           Container(
-            width: 36, height: 4,
-            decoration: BoxDecoration(color: AppTheme.inputBorder, borderRadius: BorderRadius.circular(2)),
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+                color: AppTheme.inputBorder,
+                borderRadius: BorderRadius.circular(2)),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'Üye Ekle',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
-          ),
+          const Text('Üye ekle',
+              style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary)),
           const SizedBox(height: 12),
           TextField(
             controller: _searchController,
@@ -417,69 +433,57 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
               hintText: 'Kullanıcı ara...',
               prefixIcon: Icon(Icons.search, color: AppTheme.textSecondary),
             ),
-            onChanged: (v) async {
-              if (v.trim().length >= 2) {
-                setState(() => _isSearching = true);
-                final res = await _service.searchUsers(v);
-                if (mounted) {
-                  setState(() {
-                    // Zaten grupta olanları filtrele
-                    _results = res.where((u) => !widget.existingMemberIds.contains(u.id)).toList();
-                    _isSearching = false;
-                  });
-                }
-              } else {
-                setState(() => _results = []);
-              }
-            },
+            onChanged: _search,
           ),
           const SizedBox(height: 12),
           Expanded(
             child: _isSearching
-                ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
-                : _results.isEmpty && _searchController.text.isNotEmpty
-                    ? const Center(child: Text('Kullanıcı bulunamadı.', style: TextStyle(color: AppTheme.textSecondary)))
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppTheme.primary))
+                : _results.isEmpty
+                    ? const Center(
+                        child: Text('Kullanıcı yazarak arayın',
+                            style: TextStyle(color: AppTheme.textSecondary)))
                     : ListView.builder(
                         itemCount: _results.length,
-                        itemBuilder: (context, i) {
-                          final user = _results[i];
-                          final isSelected = _selectedIds.contains(user.id);
+                        itemBuilder: (_, i) {
+                          final u = _results[i];
+                          final on = _selected.containsKey(u.id);
                           return CheckboxListTile(
-                            value: isSelected,
+                            value: on,
                             activeColor: AppTheme.primary,
-                            title: Text(user.username, style: const TextStyle(color: AppTheme.textPrimary)),
+                            title: Text(u.username,
+                                style: const TextStyle(
+                                    color: AppTheme.textPrimary)),
                             secondary: CircleAvatar(
                               backgroundColor: AppTheme.primary,
-                              backgroundImage: user.avatarUrl != null ? CachedNetworkImageProvider(user.avatarUrl!) : null,
-                              child: user.avatarUrl == null 
-                                  ? Text(user.username[0].toUpperCase(), style: const TextStyle(color: Colors.white)) 
+                              backgroundImage: u.avatarUrl != null
+                                  ? CachedNetworkImageProvider(u.avatarUrl!)
+                                  : null,
+                              child: u.avatarUrl == null
+                                  ? Text(u.initial,
+                                      style: const TextStyle(
+                                          color: Colors.white))
                                   : null,
                             ),
-                            onChanged: (val) {
-                              setState(() {
-                                if (val == true) {
-                                  _selectedIds.add(user.id);
-                                } else {
-                                  _selectedIds.remove(user.id);
-                                }
-                              });
-                            },
+                            onChanged: (val) => setState(() {
+                              if (val == true) {
+                                _selected[u.id] = u;
+                              } else {
+                                _selected.remove(u.id);
+                              }
+                            }),
                           );
                         },
                       ),
           ),
-          if (_selectedIds.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    final selectedProfiles = _results.where((u) => _selectedIds.contains(u.id)).toList();
-                    Navigator.pop(context, selectedProfiles);
-                  },
-                  child: Text('${_selectedIds.length} Kişiyi Ekle'),
-                ),
+          if (_selected.isNotEmpty)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () =>
+                    Navigator.pop(context, _selected.values.toList()),
+                child: Text('${_selected.length} kişiyi ekle'),
               ),
             ),
         ],
