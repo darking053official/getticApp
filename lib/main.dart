@@ -26,6 +26,7 @@ import 'pages/apps.dart';
 import 'pages/auth_page.dart';
 import 'services/cloud_vaults.dart';
 import 'services/meet_service.dart';
+import 'services/chat_lock_service.dart';
 import 'services/meet_push_handler.dart';
 import 'services/notification_service.dart';
 
@@ -155,6 +156,7 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
     } else if (state == AppLifecycleState.paused) {
       AppState().setAppInForeground(false);
       _pausedAt = DateTime.now();
+      ChatLock.instance.lockSession();
     }
   }
 
