@@ -26,6 +26,7 @@ import '../models/profile.dart';
 import '../services/supabase_service.dart';
 import '../services/storage_service.dart';
 import 'profile_preview.dart';
+import 'group_info_page.dart';
 
 // ============================================================
 // AYARLAR
@@ -38,6 +39,155 @@ const String _kGifFunctionName = 'search-gifs';
 
 /// Yarım kalan mesajlar cihazda saklansın mı?
 const bool _kPersistDrafts = true;
+
+/// Emoji paneli için hazır liste.
+const List<String> _kEmojis = [
+  '😀',
+  '😃',
+  '😄',
+  '😁',
+  '😆',
+  '😅',
+  '😂',
+  '🤣',
+  '😊',
+  '😇',
+  '🙂',
+  '🙃',
+  '😉',
+  '😌',
+  '😍',
+  '🥰',
+  '😘',
+  '😗',
+  '😙',
+  '😚',
+  '😋',
+  '😛',
+  '😜',
+  '🤪',
+  '😝',
+  '🤑',
+  '🤗',
+  '🤭',
+  '🤫',
+  '🤔',
+  '🤐',
+  '🤨',
+  '😐',
+  '😑',
+  '😶',
+  '😏',
+  '😒',
+  '🙄',
+  '😬',
+  '🤥',
+  '😔',
+  '😪',
+  '🤤',
+  '😴',
+  '😷',
+  '🤒',
+  '🤕',
+  '🤢',
+  '🤮',
+  '🤧',
+  '🥵',
+  '🥶',
+  '😵',
+  '🤯',
+  '🤠',
+  '🥳',
+  '😎',
+  '🤓',
+  '🧐',
+  '😕',
+  '😟',
+  '🙁',
+  '😮',
+  '😯',
+  '😲',
+  '😳',
+  '🥺',
+  '😦',
+  '😧',
+  '😨',
+  '😰',
+  '😥',
+  '😢',
+  '😭',
+  '😱',
+  '😖',
+  '😣',
+  '😞',
+  '😓',
+  '😩',
+  '😫',
+  '🥱',
+  '😤',
+  '😡',
+  '😠',
+  '🤬',
+  '😈',
+  '👿',
+  '💀',
+  '💩',
+  '🤡',
+  '👻',
+  '👽',
+  '🤖',
+  '😺',
+  '😸',
+  '😹',
+  '😻',
+  '😼',
+  '😽',
+  '🙀',
+  '😿',
+  '😾',
+  '👍',
+  '👎',
+  '👌',
+  '✌',
+  '🤞',
+  '🤟',
+  '🤘',
+  '👏',
+  '🙌',
+  '👐',
+  '🤲',
+  '🤝',
+  '🙏',
+  '💪',
+  '❤',
+  '🧡',
+  '💛',
+  '💚',
+  '💙',
+  '💜',
+  '🖤',
+  '🤍',
+  '💔',
+  '💕',
+  '💞',
+  '💓',
+  '💗',
+  '💖',
+  '💘',
+  '💝',
+  '🔥',
+  '✨',
+  '⭐',
+  '🌟',
+  '💯',
+  '✅',
+  '❌',
+  '⚠',
+  '🎉',
+  '🎊',
+  '🎁',
+  '🏆',
+];
 
 /// İmzalı URL önbelleği (süre dolmadan yenilenir).
 class _CachedUrl {
@@ -104,11 +254,18 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
 
 class ChatRoomPage extends StatefulWidget {
   final String conversationId;
+  /// Birebir sohbette karşı kullanıcı. Grupta grup adını taşıyan yer tutucu.
   final Profile otherUser;
+  final bool isGroup;
+  final String? groupName;
+  final String? groupCreatedBy;
   const ChatRoomPage({
     super.key,
     required this.conversationId,
     required this.otherUser,
+    this.isGroup = false,
+    this.groupName,
+    this.groupCreatedBy,
   });
 
   @override
@@ -163,6 +320,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   int _recordSeconds = 0;
 
   Message? _replyTo;
+  bool _showEmoji = false;
+  Map<String, String> _memberNames = {};
+  String? _groupNameOverride;
 
   @override
   void initState() {
@@ -172,6 +332,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     _subscribeToTyping();
     _subscribeToReads();
     _refreshOtherReadAt();
+    if (widget.isGroup) _loadGroupMembers();
     _readPoll = Timer.periodic(
         const Duration(seconds: 15), (_) => _refreshOtherReadAt());
     WidgetsBinding.instance.addPostFrameCallback((_) => _markRead());
@@ -226,6 +387,53 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         await prefs.setString(key, text);
       }
     } catch (_) {}
+  }
+
+  void _toggleEmoji() {
+    setState(() => _showEmoji = !_showEmoji);
+    if (_showEmoji) {
+      _inputFocus.unfocus();
+    } else {
+      _inputFocus.requestFocus();
+    }
+  }
+
+  /// İmleç konumuna emoji ekler (seçili metin varsa onun yerine).
+  void _insertEmoji(String emoji) {
+    final v = _controller.value;
+    final len = v.text.length;
+    var start = v.selection.isValid ? v.selection.start : len;
+    var end = v.selection.isValid ? v.selection.end : len;
+    if (start < 0) start = len;
+    if (end < 0) end = len;
+    final text = v.text.replaceRange(start, end, emoji);
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: start + emoji.length),
+    );
+  }
+
+  Widget _buildEmojiPanel() {
+    return Container(
+      height: 240,
+      color: AppTheme.surface,
+      child: GridView.builder(
+        padding: const EdgeInsets.all(8),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 46,
+          mainAxisSpacing: 4,
+          crossAxisSpacing: 4,
+        ),
+        itemCount: _kEmojis.length,
+        itemBuilder: (_, i) => InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => _insertEmoji(_kEmojis[i]),
+          child: Center(
+            child: Text(_kEmojis[i], style: const TextStyle(fontSize: 24)),
+          ),
+        ),
+      ),
+    );
   }
 
   void _startReply(Message m) {
@@ -313,7 +521,41 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         .subscribe();
   }
 
+  String get _title => widget.isGroup
+      ? (_groupNameOverride ?? widget.groupName ?? widget.otherUser.username)
+      : widget.otherUser.username;
+
+  Future<void> _loadGroupMembers() async {
+    final list = await _service.getGroupMembers(widget.conversationId);
+    if (!mounted) return;
+    setState(() {
+      _memberNames = {for (final p in list) p.id: p.username};
+    });
+  }
+
+  /// Grup bilgilerini açar. Ad değiştiyse başlığı günceller, gruptan ayrılındıysa sohbeti kapatır.
+  Future<void> _openGroupInfo() async {
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GroupInfoPage(
+          conversationId: widget.conversationId,
+          groupName: _title,
+          createdBy: widget.groupCreatedBy,
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+    if (result == kGroupLeft) {
+      Navigator.pop(context);
+      return;
+    }
+    setState(() => _groupNameOverride = result);
+    _loadGroupMembers();
+  }
+
   Future<void> _refreshOtherReadAt() async {
+    if (widget.isGroup) return; // grupta tek bir karşı taraf yok
     final t = await _service.getOtherReadAt(widget.conversationId);
     if (!mounted) return;
     setState(() => _otherReadAt = t);
@@ -1177,12 +1419,19 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           if (_replyTo != null) _buildReplyPreview(),
 
           _isRecording ? _buildRecordingBar() : _buildInputBar(),
+          if (_showEmoji && !_isRecording) _buildEmojiPanel(),
         ],
       ),
     );
   }
 
   PreferredSizeWidget _buildAppBar() {
+    final title = _title;
+    final subtitle = widget.isGroup
+        ? '${_memberNames.length} üye'
+        : (_isOtherTyping
+            ? 'yazıyor...'
+            : (widget.otherUser.showOnlineStatus ? 'Çevrimiçi' : 'Çevrimdışı'));
     return AppBar(
       backgroundColor: AppTheme.surface,
       elevation: 0,
@@ -1190,58 +1439,63 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       title: Row(
         children: [
           GestureDetector(
-            onTap: _openProfilePreview,
-            child: CircleAvatar(
-              backgroundColor: AppTheme.primary,
-              radius: 20,
-              backgroundImage: widget.otherUser.avatarUrl != null
-                  ? CachedNetworkImageProvider(widget.otherUser.avatarUrl!)
-                  : null,
-              child: widget.otherUser.avatarUrl == null
-                  ? Text(
-                      widget.otherUser.username.isNotEmpty
-                          ? widget.otherUser.username[0].toUpperCase()
-                          : '?',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    )
-                  : null,
-            ),
+            onTap: widget.isGroup ? _openGroupInfo : _openProfilePreview,
+            child: widget.isGroup
+                ? const CircleAvatar(
+                    radius: 20,
+                    backgroundColor: AppTheme.primary,
+                    child: Icon(Icons.groups, color: Colors.white),
+                  )
+                : CircleAvatar(
+                    backgroundColor: AppTheme.primary,
+                    radius: 20,
+                    backgroundImage: widget.otherUser.avatarUrl != null
+                        ? CachedNetworkImageProvider(widget.otherUser.avatarUrl!)
+                        : null,
+                    child: widget.otherUser.avatarUrl == null
+                        ? Text(
+                            widget.otherUser.initial,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          )
+                        : null,
+                  ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.otherUser.username,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
+            child: GestureDetector(
+              onTap: widget.isGroup ? _openGroupInfo : null,
+              behavior: HitTestBehavior.opaque,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
                   ),
-                ),
-                Text(
-                  _isOtherTyping
-                      ? 'yazıyor...'
-                      : (widget.otherUser.showOnlineStatus
-                          ? 'Çevrimiçi'
-                          : 'Çevrimdışı'),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _isOtherTyping
-                        ? AppTheme.primary
-                        : AppTheme.textSecondary,
-                    fontStyle:
-                        _isOtherTyping ? FontStyle.italic : FontStyle.normal,
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: (_isOtherTyping && !widget.isGroup)
+                          ? AppTheme.primary
+                          : AppTheme.textSecondary,
+                      fontStyle: (_isOtherTyping && !widget.isGroup)
+                          ? FontStyle.italic
+                          : FontStyle.normal,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -1379,6 +1633,17 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (widget.isGroup && !isMine && !grouped)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text(
+                    _memberNames[msg.senderId] ?? 'Üye',
+                    style: const TextStyle(
+                        color: AppTheme.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
               _buildQuotedReply(msg, isMine, textColor),
               _buildMessageBody(msg, isMine, textColor),
               const SizedBox(height: 4),
@@ -1396,7 +1661,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     if (createdAt != null)
                       Text(DateFormat('HH:mm').format(createdAt),
                           style: TextStyle(color: metaColor, fontSize: 10)),
-                    if (isMine && !msg.isDeleted) ...[
+                    if (isMine && !msg.isDeleted && !widget.isGroup) ...[
                       const SizedBox(width: 4),
                       Icon(
                         read ? Icons.done_all : Icons.done,
@@ -1741,6 +2006,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 icon: const Icon(Icons.add_circle_outline,
                     color: AppTheme.primary),
                 onPressed: _isUploading ? null : _showAttachmentMenu,
+              ),
+              IconButton(
+                tooltip: 'Emoji',
+                icon: Icon(
+                  _showEmoji ? Icons.keyboard : Icons.emoji_emotions_outlined,
+                  color: AppTheme.primary,
+                ),
+                onPressed: _toggleEmoji,
               ),
               Expanded(
                 child: TextField(
