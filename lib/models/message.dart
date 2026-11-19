@@ -10,6 +10,7 @@ class Message {
   final DateTime? editedAt;
   final bool isRead;
   final bool isDeleted;
+  final bool forwarded;
 
   Message({
     required this.id,
@@ -23,6 +24,7 @@ class Message {
     this.editedAt,
     this.isRead = false,
     this.isDeleted = false,
+    this.forwarded = false,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -42,6 +44,7 @@ class Message {
           : null,
       isRead: json['is_read'] as bool? ?? false,
       isDeleted: json['is_deleted'] as bool? ?? false,
+      forwarded: json['forwarded'] as bool? ?? false,
     );
   }
 }
