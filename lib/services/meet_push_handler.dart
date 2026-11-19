@@ -13,6 +13,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/profile.dart';
 import '../pages/chat_room_page.dart';
+import 'chat_lock_service.dart';
 import 'meet_log.dart';
 import 'meet_service.dart';
 
@@ -53,6 +54,9 @@ Future<void> _openChatFromPush(String convId) async {
     if (p == null) return;
     final nav = appNavigatorKey.currentState;
     if (nav == null) return;
+    // Kilitli sohbetse bildirimden de PIN iste
+    final unlocked = await ChatLock.instance.ensureUnlocked(nav.context, convId);
+    if (!unlocked) return;
     nav.push(MaterialPageRoute(
       builder: (_) => ChatRoomPage(
         conversationId: convId,
