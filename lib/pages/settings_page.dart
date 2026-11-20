@@ -27,6 +27,7 @@ import '../models/profile.dart';
 import '../services/cloud_notebook.dart';
 import '../services/cloud_pass.dart';
 import '../services/cloud_vaults.dart';
+import '../services/app_lock.dart';
 import '../services/web_crypto.dart';
 import '../services/supabase_service.dart';
 import 'profile_page.dart';
@@ -803,6 +804,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 _section('Güvenlik', c),
                 _card(c, [
+                  _tile(c, Icons.lock_outline, 'Uygulama kilidi',
+                      subtitle: AppLock.instance.enabled
+                          ? 'Açık (30 sn arka planda kalınca PIN sorulur)'
+                          : 'Kapalı',
+                      onTap: _busy ? null : _toggleAppLock),
+                  _divider(c),
                   _tile(c, Icons.key_outlined, 'Parola Kasası şifresi',
                       subtitle: 'Parola kasasını açan şifre',
                       onTap: _busy
@@ -1103,6 +1110,113 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(children: children),
       ),
     );
+  }
+
+  Future<void> _toggleAppLock() async {
+    if (AppLock.instance.enabled) {
+      final pin = await _askPinDialog('Kilidi kapatmak için PIN');
+      if (pin == null) return;
+      if (!await AppLock.instance.verifyPin(pin)) {
+        _snackMsg('PIN yanlış');
+        return;
+      }
+      await AppLock.instance.disable();
+      _snackMsg('Uygulama kilidi kapatıldı');
+    } else {
+      final pin = await _askNewPinDialog();
+      if (pin == null) return;
+      await AppLock.instance.setPin(pin);
+      _snackMsg('Uygulama kilidi açıldı');
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _snackMsg(String m) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(m),
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  Future<String?> _askPinDialog(String title) async {
+    final c = context.appColors;
+    final ctl = TextEditingController();
+    final res = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: Text(title, style: TextStyle(color: c.textPrimary)),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'PIN'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('İptal')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctl.text.trim()),
+              child: Text('Tamam', style: TextStyle(color: c.primary))),
+        ],
+      ),
+    );
+    ctl.dispose();
+    return (res == null || res.length < 4) ? null : res;
+  }
+
+  Future<String?> _askNewPinDialog() async {
+    final c = context.appColors;
+    final a = TextEditingController();
+    final b = TextEditingController();
+    final res = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: Text('Uygulama için PIN belirleyin',
+            style: TextStyle(color: c.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: a,
+              autofocus: true,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'PIN (en az 4 hane)'),
+            ),
+            TextField(
+              controller: b,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'PIN (tekrar)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('İptal')),
+          TextButton(
+              onPressed: () {
+                final p = a.text.trim();
+                if (p.length >= 4 && p == b.text.trim()) {
+                  Navigator.pop(ctx, p);
+                } else {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                      content: Text('PIN en az 4 hane ve eşleşmeli')));
+                }
+              },
+              child: Text('Kaydet', style: TextStyle(color: c.primary))),
+        ],
+      ),
+    );
+    a.dispose();
+    b.dispose();
+    return res;
   }
 
   Widget _tile(
