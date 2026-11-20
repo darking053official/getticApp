@@ -24,6 +24,7 @@ import '../services/supabase_service.dart';
 import 'chat_room_page.dart';
 import 'new_group_page.dart';
 import '../services/chat_lock_service.dart';
+import '../services/desktop_notifier.dart';
 import 'settings_page.dart';
 
 const String _kProfilesTable = 'profiles';
@@ -192,6 +193,7 @@ class _ChatListPageState extends State<ChatListPage>
   void _onMessageChange(PostgresChangePayload payload) {
     if (!mounted) return;
     if (payload.eventType == PostgresChangeEvent.insert) {
+      unawaited(_desktopNotifyIfNeeded(payload.newRecord));
       if (_applyInsert(payload.newRecord)) return; // bildirim: sunucu push'u gönderir
     }
     _scheduleReload();
@@ -248,6 +250,51 @@ class _ChatListPageState extends State<ChatListPage>
       body: body,
       payload: convId,
     );
+  }
+
+  /// Masaüstünde, açık olmayan bir sohbetten gelen mesaj için yerel bildirim gösterir.
+  Future<void> _desktopNotifyIfNeeded(Map<String, dynamic> rec) async {
+    if (!DesktopNotifier.isDesktop) return;
+    final convId = rec['conversation_id']?.toString();
+    if (convId == null || rec['sender_id']?.toString() == _uid) return;
+    if (!AppState().shouldShowNotification(convId)) return;
+    try {
+      if (await _service.getMuted(convId)) return;
+    } catch (_) {}
+
+    Map<String, dynamic>? conv;
+    for (final c in _all) {
+      if (_idOf(c) == convId) {
+        conv = c;
+        break;
+      }
+    }
+    final isGroup = conv?['is_group'] == true;
+    final title = (isGroup
+            ? (conv?['group_name'] ?? 'Grup')
+            : (conv?['other_user']?['username'] ?? 'Yeni mesaj'))
+        .toString();
+
+    await DesktopNotifier.show(title: title, body: _recordPreview(rec));
+  }
+
+  String _recordPreview(Map<String, dynamic> rec) {
+    if (rec['is_deleted'] == true) return 'Bu mesaj silindi';
+    switch ((rec['type'] ?? 'text').toString()) {
+      case 'image':
+        return 'Fotoğraf';
+      case 'video':
+        return 'Video';
+      case 'audio':
+      case 'voice':
+        return 'Sesli mesaj';
+      case 'file':
+        return 'Dosya';
+      case 'gif':
+        return 'GIF';
+      default:
+        return (rec['content'] ?? '').toString();
+    }
   }
 
   /// Yeni mesajı ağa gitmeden listeye uygular.
