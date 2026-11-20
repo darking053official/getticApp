@@ -177,7 +177,7 @@ class SupabaseService {
 
         final convData = await _client
             .from(AppConstants.tableConversations)
-            .select('type, name, created_by')
+            .select('type, name, created_by, group_avatar_url')
             .eq('id', convId)
             .maybeSingle();
 
@@ -207,6 +207,7 @@ class SupabaseService {
           'is_group': convData?['type'] == 'group',
           'group_name': convData?['name'],
           'created_by': convData?['created_by'],
+          'group_avatar_url': convData?['group_avatar_url'],
         });
       }
 
@@ -606,6 +607,36 @@ class SupabaseService {
     } catch (_) {
       return null;
     }
+  }
+
+  // ==========================================
+  // PARTİ 3: YÖNETİCİ DEVRİ, GRUPTAN AYRILMA, GRUP FOTOĞRAFI
+  // ==========================================
+
+  /// Grup bilgisi: ad, yönetici (created_by) ve fotoğraf yolu.
+  Future<Map<String, dynamic>?> getGroupInfo(String conversationId) async {
+    return await _client
+        .from(AppConstants.tableConversations)
+        .select('name, created_by, group_avatar_url')
+        .eq('id', conversationId)
+        .maybeSingle();
+  }
+
+  /// Yöneticiliği başka bir üyeye devreder (yalnızca yönetici yapabilir).
+  Future<void> transferGroupAdmin(String conversationId, String newAdminId) async {
+    await _client.rpc('transfer_group_admin',
+        params: {'p_conv': conversationId, 'p_new': newAdminId});
+  }
+
+  /// Gruptan ayrılır. Yönetici ayrılırsa yetki en eski üyeye geçer.
+  Future<void> leaveGroupRpc(String conversationId) async {
+    await _client.rpc('leave_group', params: {'p_conv': conversationId});
+  }
+
+  /// Grup fotoğrafı yolunu kaydeder (yalnızca yönetici).
+  Future<void> setGroupAvatar(String conversationId, String storagePath) async {
+    await _client.rpc('set_group_avatar',
+        params: {'p_conv': conversationId, 'p_path': storagePath});
   }
 
   /// Alıcılara OneSignal push gönderir (uygulama kapalıyken de bildirim gelsin).
