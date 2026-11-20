@@ -28,6 +28,7 @@ import '../services/storage_service.dart';
 import 'profile_preview.dart';
 import 'group_info_page.dart';
 import '../services/chat_outbox.dart';
+import '../services/e2ee_media.dart';
 
 // ============================================================
 // AYARLAR
@@ -1445,21 +1446,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         return;
       }
 
-      final path = await _storage.uploadChatMedia(
+      await _service.sendEncryptedMedia(
+        conversationId: widget.conversationId,
+        type: type,
         file: file,
-        conversationId: widget.conversationId,
-        type: type,
-      );
-
-      if (path == null) {
-        _showSnack('Medya yüklenemedi', isError: true);
-        return;
-      }
-
-      await _service.sendMediaMessage(
-        conversationId: widget.conversationId,
-        type: type,
-        mediaPath: path,
         replyToId: reply?.id,
       );
       if (mounted) setState(() => _replyTo = null);
@@ -1649,7 +1639,19 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     }
   }
 
-  Future<String?> _resolveMediaUrl(String path) {
+  Future<String?> _resolveMediaUrl(String path, [Message? msg]) {
+    final secret = msg?.mediaSecret;
+    if (msg != null && secret != null) {
+      return E2eeMedia.instance
+          .localPath(
+            convId: msg.conversationId,
+            storagePath: path,
+            secret: secret,
+            fileName: (secret['name'] ?? '').toString(),
+          )
+          .then<String?>((p) => p)
+          .catchError((_) => null);
+    }
     final cached = _urlCache[path];
     if (cached != null && cached.expiresAt.isAfter(DateTime.now())) {
       return cached.future;
@@ -2479,7 +2481,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     if (path == null) return _mediaError();
 
     return FutureBuilder<String?>(
-      future: _resolveMediaUrl(path),
+      future: _resolveMediaUrl(path, msg),
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
           return _mediaPlaceholder();
@@ -2496,13 +2498,16 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             borderRadius: BorderRadius.circular(12),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 320),
-              child: CachedNetworkImage(
-                imageUrl: url,
-                width: 220,
-                fit: BoxFit.cover,
-                placeholder: (_, __) => _mediaPlaceholder(),
-                errorWidget: (_, __, ___) => _mediaError(),
-              ),
+              child: url.startsWith('http')
+                  ? CachedNetworkImage(
+                      imageUrl: url,
+                      width: 220,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => _mediaPlaceholder(),
+                      errorWidget: (_, __, ___) => _mediaError(),
+                    )
+                  : Image.file(File(url),
+                      width: 220, fit: BoxFit.cover),
             ),
           ),
         );
@@ -2515,7 +2520,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     if (path == null) return _mediaError();
 
     return GestureDetector(
-      onTap: () => _openVideo(path),
+      onTap: () => _openVideo(path, msg),
       child: Container(
         width: 220,
         height: 140,
@@ -2530,8 +2535,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     );
   }
 
-  Future<void> _openVideo(String path) async {
-    final url = await _resolveMediaUrl(path);
+  Future<void> _openVideo(String path, Message msg) async {
+    final url = await _resolveMediaUrl(path, msg);
     if (!mounted) return;
     if (url == null) {
       _showSnack('Video açılamadı', isError: true);
@@ -2544,11 +2549,16 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   }
 
   /// Dosyayı geçici klasöre indirir ve cihazdaki uygun uygulamayla açar.
-  Future<void> _openFile(String path) async {
-    final url = await _resolveMediaUrl(path);
+  Future<void> _openFile(String path, Message msg) async {
+    final url = await _resolveMediaUrl(path, msg);
     if (!mounted) return;
     if (url == null) {
       _showSnack('Dosya bağlantısı alınamadı', isError: true);
+      return;
+    }
+    // Şifreli dosya zaten yerel olarak çözüldü
+    if (!url.startsWith('http')) {
+      await OpenFilex.open(url);
       return;
     }
 
@@ -2581,7 +2591,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     if (path == null) return _mediaError();
     return _AudioPlayerTile(
       key: ValueKey('audio_${msg.id}'),
-      urlLoader: () => _resolveMediaUrl(path),
+      urlLoader: () => _resolveMediaUrl(path, msg),
       color: textColor,
       seed: msg.id.toString(),
     );
@@ -2593,7 +2603,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     final name = path.split('/').last;
 
     return InkWell(
-      onTap: () => _openFile(path),
+      onTap: () => _openFile(path, msg),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2926,7 +2936,11 @@ class _AudioPlayerTileState extends State<_AudioPlayerTile> {
         });
         final url = await widget.urlLoader();
         if (url == null) throw Exception('url yok');
-        await _player.setUrl(url);
+        if (url.startsWith('http')) {
+          await _player.setUrl(url);
+        } else {
+          await _player.setFilePath(url);
+        }
         _loaded = true;
         if (mounted) setState(() => _loading = false);
       }
@@ -3091,16 +3105,18 @@ class _ImageViewerPage extends StatelessWidget {
         child: InteractiveViewer(
           minScale: 1,
           maxScale: 5,
-          child: CachedNetworkImage(
-            imageUrl: url,
-            fit: BoxFit.contain,
-            placeholder: (_, __) =>
-                const CircularProgressIndicator(color: AppTheme.primary),
-            errorWidget: (_, __, ___) => const Icon(
-                Icons.broken_image_outlined,
-                color: Colors.white54,
-                size: 48),
-          ),
+          child: url.startsWith('http')
+              ? CachedNetworkImage(
+                  imageUrl: url,
+                  fit: BoxFit.contain,
+                  placeholder: (_, __) =>
+                      const CircularProgressIndicator(color: AppTheme.primary),
+                  errorWidget: (_, __, ___) => const Icon(
+                      Icons.broken_image_outlined,
+                      color: Colors.white54,
+                      size: 48),
+                )
+              : Image.file(File(url), fit: BoxFit.contain),
         ),
       ),
     );
@@ -3134,7 +3150,9 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
   }
 
   Future<void> _init() async {
-    final vc = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    final vc = widget.url.startsWith('http')
+        ? VideoPlayerController.networkUrl(Uri.parse(widget.url))
+        : VideoPlayerController.file(File(widget.url));
     _vc = vc;
     try {
       await vc.initialize();
