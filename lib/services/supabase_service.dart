@@ -1,5 +1,4 @@
 // lib/services/supabase_service.dart
-// (.txt olarak verildi. Projeye eklerken adını supabase_service.dart yapın.)
 
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -419,7 +418,15 @@ class SupabaseService {
         .stream(primaryKey: ['id'])
         .eq('conversation_id', conversationId)
         .order('created_at', ascending: true)
-        .map((data) => data.map((json) => Message.fromJson(json)).toList());
+        .map((data) => data
+            .where((j) {
+              final e = j['expires_at'];
+              if (e == null) return true;
+              final t = DateTime.tryParse(e.toString());
+              return t == null || t.isAfter(DateTime.now().toUtc());
+            })
+            .map((json) => Message.fromJson(json))
+            .toList());
   }
 
   /// Metin mesajı gönderir
@@ -542,6 +549,62 @@ class SupabaseService {
         content: m.content,
         forwarded: true,
       );
+    }
+  }
+
+  // ==========================================
+  // PARTİ 2: SESSİZE ALMA, KAYBOLAN MESAJLAR, BAĞLANTI ÖNİZLEMESİ
+  // ==========================================
+
+  Future<void> setMuted(String conversationId, bool muted) async {
+    final me = currentUser?.id;
+    if (me == null) return;
+    await _client
+        .from(AppConstants.tableConversationMembers)
+        .update({'muted': muted})
+        .eq('conversation_id', conversationId)
+        .eq('user_id', me);
+  }
+
+  Future<bool> getMuted(String conversationId) async {
+    final me = currentUser?.id;
+    if (me == null) return false;
+    final row = await _client
+        .from(AppConstants.tableConversationMembers)
+        .select('muted')
+        .eq('conversation_id', conversationId)
+        .eq('user_id', me)
+        .maybeSingle();
+    return row?['muted'] == true;
+  }
+
+  /// Kaybolan mesaj süresi (saniye). null = kapalı.
+  Future<int?> getDisappearing(String conversationId) async {
+    final row = await _client
+        .from(AppConstants.tableConversations)
+        .select('disappear_seconds')
+        .eq('id', conversationId)
+        .maybeSingle();
+    final v = row?['disappear_seconds'];
+    return v == null ? null : (v as num).toInt();
+  }
+
+  Future<void> setDisappearing(String conversationId, int? seconds) async {
+    await _client
+        .from(AppConstants.tableConversations)
+        .update({'disappear_seconds': seconds})
+        .eq('id', conversationId);
+  }
+
+  /// Bağlantının başlık, açıklama ve görselini getirir (link-preview fonksiyonu).
+  Future<Map<String, dynamic>?> linkPreview(String url) async {
+    try {
+      final res = await _client.functions.invoke('link-preview', body: {'url': url});
+      final d = res.data;
+      if (d is Map && d['error'] == null) return Map<String, dynamic>.from(d);
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 
