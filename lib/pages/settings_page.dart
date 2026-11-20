@@ -28,6 +28,7 @@ import '../services/cloud_notebook.dart';
 import '../services/cloud_pass.dart';
 import '../services/cloud_vaults.dart';
 import '../services/app_lock.dart';
+import '../services/notification_privacy.dart';
 import '../services/web_crypto.dart';
 import '../services/supabase_service.dart';
 import 'profile_page.dart';
@@ -842,6 +843,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 _section('Bildirimler', c),
                 _card(c, [
+                  const NotificationPrivacyTile(),
+                  _divider(c),
                   _switch(c, Icons.notifications_active_outlined,
                       'Uygulama içi bildirimler',
                       subtitle: 'Kapalıyken uygulama açıkken bildirim gelmez',
