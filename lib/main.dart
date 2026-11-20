@@ -1,11 +1,11 @@
 // ============================================================
 // lib/main.dart
+// (.txt olarak verildi. Projeye eklerken adını main.dart yapın.)
 //
 // Ayar bağlantıları:
 //  - Tema / yazı boyutu: AppSettings -> MaterialApp
 //  - Otomatik kilit: uygulama arka plana gidince AppSettings.autoLockMinutes kontrol edilir
 //  - Uygulama içi bildirim: AppSettings.inAppNotifications
-//  - Uygulama kilidi: AppLock (30 sn arka plan sonrası PIN)
 // ============================================================
 
 import 'dart:async';
@@ -28,6 +28,7 @@ import 'services/cloud_vaults.dart';
 import 'services/meet_service.dart';
 import 'services/chat_lock_service.dart';
 import 'services/app_lock.dart';
+import 'services/desktop_notifier.dart';
 import 'services/meet_push_handler.dart';
 import 'services/notification_service.dart';
 
@@ -58,6 +59,9 @@ void main() async {
   await NotificationService().initialize(
     onResponse: MeetService.instance.onNotificationResponse,
   );
+
+  // Masaüstü yerel bildirimleri (Windows/macOS/Linux, uygulama açıkken)
+  await DesktopNotifier.init();
 
   // Ayarlar runApp'ten önce yüklenir: tema ve yazı boyutu titremez
   await AppSettings.instance.ensureLoaded();
