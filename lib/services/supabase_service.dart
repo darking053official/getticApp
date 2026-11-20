@@ -2,11 +2,14 @@
 // (.txt olarak verildi. Projeye eklerken adını supabase_service.dart yapın.)
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/constants.dart';
 import '../models/profile.dart';
 import '../models/message.dart';
 import 'e2ee_chat.dart';
+import 'e2ee_media.dart';
 
 class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
@@ -388,6 +391,8 @@ class SupabaseService {
         .delete()
         .eq('conversation_id', conversationId)
         .eq('user_id', userId);
+    // Çıkarılan kişi yeni anahtarı alamasın: hemen yeni sürüm üret
+    unawaited(E2eeChat.instance.rotateIfNeeded(conversationId));
   }
 
   Future<void> addGroupMembers(String conversationId, List<String> userIds) async {
@@ -396,6 +401,8 @@ class SupabaseService {
         .toList();
 
     await _client.from(AppConstants.tableConversationMembers).insert(inserts);
+    // Yeni üyeler yalnızca bu andan sonraki anahtarı alsın
+    unawaited(E2eeChat.instance.rotateIfNeeded(conversationId));
   }
 
   // ==========================================
@@ -485,6 +492,47 @@ class SupabaseService {
     _touchConversation(conversationId);
   }
 
+  /// Dosyayı şifreleyip yükler, şifreli medya mesajı olarak gönderir (Aşama 4).
+  Future<void> sendEncryptedMedia({
+    required String conversationId,
+    required String type,
+    required File file,
+    String? caption,
+    String? replyToId,
+    String? originalName,
+    bool forwarded = false,
+  }) async {
+    if (currentUser == null) throw Exception('Giriş yapmalısınız');
+    final name = originalName ?? file.path.split(Platform.pathSeparator).last;
+    final bytes = await file.readAsBytes();
+
+    final up = await E2eeMedia.instance.encryptAndUpload(conversationId, bytes);
+    final secret = Map<String, dynamic>.from(up['secret'] as Map)
+      ..['type'] = type
+      ..['name'] = name;
+    final payload = jsonEncode({'t': (caption ?? '').trim(), 'm': secret});
+
+    final enc = await E2eeChat.instance.encrypt(conversationId, payload);
+    if (enc == null) {
+      throw Exception('Karşı tarafın şifreli cihazı yok, medya gönderilemedi');
+    }
+
+    final inserted = await _client.from(AppConstants.tableMessages).insert({
+      'conversation_id': conversationId,
+      'sender_id': currentUser!.id,
+      'content': null,
+      'enc': enc,
+      'enc_version': 1,
+      'type': type,
+      'media_url': up['path'],
+      'forwarded': forwarded,
+      if (replyToId != null) 'reply_to': replyToId,
+    }).select('id').single();
+
+    _pushMessage(conversationId, inserted['id'].toString());
+    _touchConversation(conversationId);
+  }
+
   // ==========================================
   // PARTİ 1: TEPKİLER, SABİTLEME, İLETME
   // ==========================================
@@ -551,6 +599,25 @@ class SupabaseService {
 
   /// Mesajı başka bir sohbete iletir. İletildi işaretlenir.
   Future<void> forwardMessage(String targetConversationId, Message m) async {
+    // Şifreli medya: indir, çöz, hedef sohbet için yeniden şifreleyip yükle
+    if (m.mediaSecret != null && m.mediaUrl != null) {
+      final name = (m.mediaSecret!['name'] ?? '').toString();
+      final local = await E2eeMedia.instance.localPath(
+        convId: m.conversationId,
+        storagePath: m.mediaUrl!,
+        secret: m.mediaSecret!,
+        fileName: name,
+      );
+      await sendEncryptedMedia(
+        conversationId: targetConversationId,
+        type: m.type,
+        file: File(local),
+        caption: m.content,
+        originalName: name.isEmpty ? null : name,
+        forwarded: true,
+      );
+      return;
+    }
     if (m.type == 'text') {
       await sendMessage(targetConversationId, m.content ?? '', forwarded: true);
     } else {
