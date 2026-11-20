@@ -24,6 +24,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/message.dart';
 import 'e2ee_device.dart';
 
+/// Bu cihaz henüz onaylanmadıysa mesaj gönderilemez.
+class E2eePendingException implements Exception {
+  @override
+  String toString() =>
+      'Bu cihaz henüz onaylanmadı. Mevcut bir cihazdan onaylayın.';
+}
+
 class _DevicePub {
   final SimplePublicKey x; // anahtar anlaşması
   final SimplePublicKey ed; // imza
@@ -125,7 +132,8 @@ class E2eeChat {
         .from('devices')
         .select('id, identity_pub_x25519')
         .inFilter('user_id', userIds)
-        .isFilter('revoked_at', null);
+        .isFilter('revoked_at', null)
+        .not('approved_at', 'is', null);
     return List<Map<String, dynamic>>.from(devices as List);
   }
 
@@ -251,6 +259,7 @@ class E2eeChat {
   /// Metni şifreler ve zarfı döndürür. Karşı tarafın E2EE cihazı yoksa null.
   Future<Map<String, dynamic>?> encrypt(String convId, String text) async {
     final me = await E2eeDevice.instance.ensureIdentity();
+    if (!me.approved) throw E2eePendingException();
     final ref = await _ensureCurrentKey(convId, me);
     if (ref == null) return null;
 
@@ -276,6 +285,50 @@ class E2eeChat {
       'mac': base64Encode(box.mac.bytes),
       'sig': base64Encode(sig.bytes),
     };
+  }
+
+  /// Onaylanan yeni cihaza, bu cihazın bildiği tüm sohbet anahtarı sürümlerini sarar.
+  /// Böylece yeni cihaz geçmiş mesajları da çözebilir.
+  Future<void> shareHistoryWith({
+    required String targetDeviceId,
+    required String targetX25519PubB64,
+  }) async {
+    final me = await E2eeDevice.instance.ensureIdentity();
+    if (!me.approved) throw E2eePendingException();
+
+    final mine = await _sb
+        .from('e2ee_conversation_keys')
+        .select('conversation_id, key_version')
+        .eq('device_id', me.deviceId);
+
+    final target = SimplePublicKey(
+      base64Decode(targetX25519PubB64),
+      type: KeyPairType.x25519,
+    );
+
+    final rows = <Map<String, dynamic>>[];
+    for (final r in mine as List) {
+      final convId = r['conversation_id'].toString();
+      final kv = (r['key_version'] as num).toInt();
+      final key = await _loadKey(convId, kv, me);
+      if (key == null) continue;
+      rows.add({
+        'conversation_id': convId,
+        'key_version': kv,
+        'device_id': targetDeviceId,
+        'wrapped_key': await _wrap(
+            key, me.x25519, convId, kv, targetDeviceId, target),
+        'sender_device_id': me.deviceId,
+      });
+    }
+
+    if (rows.isNotEmpty) {
+      await _sb.from('e2ee_conversation_keys').upsert(
+            rows,
+            onConflict: 'conversation_id,key_version,device_id',
+            ignoreDuplicates: true,
+          );
+    }
   }
 
   /// Zarfı çözer. Başarısızsa (anahtar yok, imza hatalı, bozuk veri) null döner.
