@@ -11,6 +11,7 @@ class Message {
   final bool isRead;
   final bool isDeleted;
   final bool forwarded;
+  final bool decryptFailed;
 
   Message({
     required this.id,
@@ -25,6 +26,7 @@ class Message {
     this.isRead = false,
     this.isDeleted = false,
     this.forwarded = false,
+    this.decryptFailed = false,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -45,6 +47,7 @@ class Message {
       isRead: json['is_read'] as bool? ?? false,
       isDeleted: json['is_deleted'] as bool? ?? false,
       forwarded: json['forwarded'] as bool? ?? false,
+      decryptFailed: json['decrypt_failed'] as bool? ?? false,
     );
   }
 }
