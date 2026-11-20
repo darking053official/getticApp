@@ -25,6 +25,7 @@ import 'chat_room_page.dart';
 import 'new_group_page.dart';
 import '../services/chat_lock_service.dart';
 import '../services/desktop_notifier.dart';
+import '../services/notification_privacy.dart';
 import 'settings_page.dart';
 
 const String _kProfilesTable = 'profiles';
@@ -275,7 +276,11 @@ class _ChatListPageState extends State<ChatListPage>
             : (conv?['other_user']?['username'] ?? 'Yeni mesaj'))
         .toString();
 
-    await DesktopNotifier.show(title: title, body: _recordPreview(rec));
+    final body = NotificationPrivacy.hidePreview
+        ? 'Yeni mesaj'
+        : _recordPreview(rec);
+    await DesktopNotifier.show(
+        title: NotificationPrivacy.hidePreview ? 'Gettic' : title, body: body);
   }
 
   String _recordPreview(Map<String, dynamic> rec) {
