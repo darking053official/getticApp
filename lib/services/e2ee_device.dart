@@ -1,14 +1,15 @@
 // ============================================================
 // lib/services/e2ee_device.dart
+// (.txt olarak verildi. Projeye eklerken adını e2ee_device.dart yapın.)
 //
-// Asama 1: cihaz kimlik anahtarlari.
-//  - X25519 (anahtar anlasmasi) ve Ed25519 (imza) ciftini uretir.
-//  - Ozel anahtarlar isletim sisteminin guvenli deposunda kalir, sunucuya gitmez.
-//  - Acik anahtarlar "devices" tablosuna kaydedilir.
-//  - Bu servis henuz hicbir yerden cagrilmaz; mevcut mesajlasmayi etkilemez.
+// Aşama 1: cihaz kimlik anahtarları.
+//  - X25519 (anahtar anlaşması) ve Ed25519 (imza) çifti üretir.
+//  - Özel anahtarlar işletim sisteminin güvenli deposunda kalır, sunucuya gitmez.
+//  - Açık anahtarlar "devices" tablosuna kaydedilir.
+//  - Bu servis henüz hiçbir yerden çağrılmaz; mevcut mesajlaşmayı etkilemez.
 //
 // Gerekli paketler: cryptography, flutter_secure_storage
-// Linux'ta libsecret yoksa guvenli depo acilamaz; E2EE o cihazda kullanilamaz.
+// Linux'ta libsecret yoksa güvenli depo açılamaz; E2EE o cihazda kullanılamaz.
 // ============================================================
 
 import 'dart:convert';
@@ -32,6 +33,7 @@ class DeviceIdentity {
   final SimpleKeyPair ed25519; // imza
   final String x25519PubB64;
   final String ed25519PubB64;
+  final bool approved; // onaylı değilse yeni anahtar sürümü almaz, mesaj gönderemez
 
   DeviceIdentity({
     required this.deviceId,
@@ -39,6 +41,7 @@ class DeviceIdentity {
     required this.ed25519,
     required this.x25519PubB64,
     required this.ed25519PubB64,
+    this.approved = false,
   });
 }
 
@@ -70,7 +73,8 @@ class E2eeDevice {
     if (existingId != null && xSeedB64 != null && edSeedB64 != null) {
       final x = await X25519().newKeyPairFromSeed(base64Decode(xSeedB64));
       final ed = await Ed25519().newKeyPairFromSeed(base64Decode(edSeedB64));
-      final identity = await _build(existingId, x, ed);
+      final approved = await _fetchApproved(existingId);
+      final identity = await _build(existingId, x, ed, approved: approved);
       _cached = identity;
       await _touch(existingId);
       return identity;
@@ -85,11 +89,14 @@ class E2eeDevice {
     final xPub = await x.extractPublicKey();
     final edPub = await ed.extractPublicKey();
 
+    // İlk cihaz otomatik onaylanır; sonradan eklenenler mevcut bir cihazın onayını bekler
+    final hasOthers = await _hasOtherActiveDevices(user.id);
     final row = await Supabase.instance.client.from('devices').insert({
       'user_id': user.id,
       'name': _deviceName(),
       'identity_pub_x25519': base64Encode(xPub.bytes),
       'identity_pub_ed25519': base64Encode(edPub.bytes),
+      'approved_at': hasOthers ? null : DateTime.now().toUtc().toIso8601String(),
     }).select('id').single();
 
     final deviceId = row['id'].toString();
@@ -98,9 +105,21 @@ class E2eeDevice {
     await _write(_kEd25519Seed, base64Encode(edSeed));
     await _write(_kDeviceId, deviceId);
 
-    final identity = await _build(deviceId, x, ed);
+    final identity = await _build(deviceId, x, ed, approved: !hasOthers);
     _cached = identity;
     return identity;
+  }
+
+  /// Onay durumunu sunucudan yeniden okur (başka cihaz onayladıysa bu cihaz da onaylanır).
+  Future<bool> refreshApproval() async {
+    final c = _cached;
+    if (c == null) return false;
+    final approved = await _fetchApproved(c.deviceId);
+    if (approved != c.approved) {
+      _cached = null;
+      await ensureIdentity();
+    }
+    return approved;
   }
 
   /// Cihaz kaydını siler (çıkışta veya anahtar sıfırlamada). Yerel anahtarlar da silinir.
@@ -122,8 +141,32 @@ class E2eeDevice {
 
   // ---------- yardımcılar ----------
 
+  Future<bool> _hasOtherActiveDevices(String userId) async {
+    final rows = await Supabase.instance.client
+        .from('devices')
+        .select('id')
+        .eq('user_id', userId)
+        .isFilter('revoked_at', null)
+        .limit(1);
+    return (rows as List).isNotEmpty;
+  }
+
+  Future<bool> _fetchApproved(String deviceId) async {
+    try {
+      final row = await Supabase.instance.client
+          .from('devices')
+          .select('approved_at')
+          .eq('id', deviceId)
+          .maybeSingle();
+      return row != null && row['approved_at'] != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<DeviceIdentity> _build(
-      String deviceId, SimpleKeyPair x, SimpleKeyPair ed) async {
+      String deviceId, SimpleKeyPair x, SimpleKeyPair ed,
+      {required bool approved}) async {
     final xPub = await x.extractPublicKey();
     final edPub = await ed.extractPublicKey();
     return DeviceIdentity(
@@ -132,6 +175,7 @@ class E2eeDevice {
       ed25519: ed,
       x25519PubB64: base64Encode(xPub.bytes),
       ed25519PubB64: base64Encode(edPub.bytes),
+      approved: approved,
     );
   }
 
