@@ -1,6 +1,5 @@
 // ============================================================
 // lib/services/desktop_notifier.dart
-// (.txt olarak verildi. Projeye eklerken adını desktop_notifier.dart yapın.)
 // Masaüstü (Windows, macOS, Linux) yerel bildirimleri.
 // Uygulama açıkken çalışır. Uygulama kapalıyken bildirim gelmez (masaüstünde push yok).
 // Mobilde hiçbir şey yapmaz.
