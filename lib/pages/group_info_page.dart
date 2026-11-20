@@ -1,17 +1,23 @@
 // ============================================================
 // lib/pages/group_info_page.dart
-// (.txt olarak verildi. Projeye eklerken adını group_info_page.dart yapın.)
-// Grup bilgileri: ad, üyeler, üye ekle/çıkar (yönetici), gruptan ayrıl.
-// Geri dönüş değeri: yeni grup adı (String), gruptan ayrıldıysa '__left__'.
+// Grup bilgileri: fotoğraf, ad, üyeler, üye ekle/çıkar, yönetici devri,
+// gruptan ayrılma. Geri dönüş: yeni grup adı (String) ya da '__left__'.
 // ============================================================
 
-import 'package:flutter/material.dart';
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../core/theme.dart';
 import '../models/profile.dart';
+import '../services/storage_service.dart';
 import '../services/supabase_service.dart';
 
 const String kGroupLeft = '__left__';
+const String _kMediaBucket = 'chat-media';
 
 class GroupInfoPage extends StatefulWidget {
   final String conversationId;
@@ -31,21 +37,25 @@ class GroupInfoPage extends StatefulWidget {
 
 class _GroupInfoPageState extends State<GroupInfoPage> {
   final _service = SupabaseService();
+  final _storage = StorageService();
   late final TextEditingController _nameController =
       TextEditingController(text: widget.groupName);
 
   late String _currentName = widget.groupName;
+  String? _adminId;
+  String? _avatarUrl; // imzalı URL (görüntüleme için)
   List<Profile> _members = [];
   bool _isLoading = true;
-  bool _isSaving = false;
+  bool _isBusy = false;
 
   String? get _myId => _service.currentUser?.id;
-  bool get _isAdmin => widget.createdBy != null && widget.createdBy == _myId;
+  bool get _isAdmin => _adminId != null && _adminId == _myId;
 
   @override
   void initState() {
     super.initState();
-    _loadMembers();
+    _adminId = widget.createdBy;
+    _loadAll();
   }
 
   @override
@@ -54,25 +64,73 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
     super.dispose();
   }
 
-  Future<void> _loadMembers() async {
+  Future<void> _loadAll() async {
     try {
-      final data = await _service.getGroupMembers(widget.conversationId);
+      final info = await _service.getGroupInfo(widget.conversationId);
+      final members = await _service.getGroupMembers(widget.conversationId);
+      String? avatar;
+      final path = info?['group_avatar_url']?.toString();
+      if (path != null && path.isNotEmpty) {
+        avatar = await _signedUrl(path);
+      }
       if (!mounted) return;
       setState(() {
-        _members = data;
+        _adminId = info?['created_by']?.toString() ?? _adminId;
+        _avatarUrl = avatar;
+        _members = members;
         _isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      _snack('Üyeler yüklenemedi: $e', isError: true);
+      _snack('Bilgiler yüklenemedi: $e', isError: true);
     }
   }
 
+  Future<String?> _signedUrl(String path) async {
+    try {
+      return await Supabase.instance.client.storage
+          .from(_kMediaBucket)
+          .createSignedUrl(path, 3600);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------- Fotoğraf ----------
+  Future<void> _changeAvatar() async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 512,
+      maxHeight: 512,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+    setState(() => _isBusy = true);
+    try {
+      final path = await _storage.uploadChatMedia(
+        file: File(picked.path),
+        conversationId: widget.conversationId,
+        type: 'image',
+      );
+      if (path == null) throw Exception('Yükleme başarısız');
+      await _service.setGroupAvatar(widget.conversationId, path);
+      final url = await _signedUrl(path);
+      if (!mounted) return;
+      setState(() => _avatarUrl = url);
+      _snack('Grup fotoğrafı güncellendi');
+    } catch (e) {
+      _snack('Fotoğraf değiştirilemedi: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
+  // ---------- Ad ----------
   Future<void> _saveName() async {
     final newName = _nameController.text.trim();
     if (newName.isEmpty || newName == _currentName) return;
-    setState(() => _isSaving = true);
+    setState(() => _isBusy = true);
     try {
       await _service.updateGroupName(widget.conversationId, newName);
       if (!mounted) return;
@@ -81,27 +139,11 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
     } catch (e) {
       _snack('Hata: $e', isError: true);
     } finally {
-      if (mounted) setState(() => _isSaving = false);
+      if (mounted) setState(() => _isBusy = false);
     }
   }
 
-  Future<void> _leaveGroup() async {
-    final ok = await _confirm(
-      title: 'Gruptan ayrıl',
-      content: 'Bu gruptan ayrılmak istediğine emin misin?',
-      confirm: 'Ayrıl',
-      isDanger: true,
-    );
-    if (ok != true || _myId == null) return;
-    try {
-      await _service.removeGroupMember(widget.conversationId, _myId!);
-      if (!mounted) return;
-      Navigator.pop(context, kGroupLeft);
-    } catch (e) {
-      _snack('Hata: $e', isError: true);
-    }
-  }
-
+  // ---------- Üyeler ----------
   Future<void> _removeMember(Profile member) async {
     final ok = await _confirm(
       title: 'Üyeyi çıkar',
@@ -113,10 +155,33 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
     try {
       await _service.removeGroupMember(widget.conversationId, member.id);
       _snack('${member.username} gruptan çıkarıldı');
-      await _loadMembers();
+      await _reloadMembers();
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
+  }
+
+  Future<void> _makeAdmin(Profile member) async {
+    final ok = await _confirm(
+      title: 'Yönetici yap',
+      content:
+          '${member.username} yönetici olunca grubu siz yönetemezsiniz. Devam edilsin mi?',
+      confirm: 'Devret',
+    );
+    if (ok != true) return;
+    try {
+      await _service.transferGroupAdmin(widget.conversationId, member.id);
+      if (!mounted) return;
+      setState(() => _adminId = member.id);
+      _snack('${member.username} artık yönetici');
+    } catch (e) {
+      _snack('Devredilemedi: $e', isError: true);
+    }
+  }
+
+  Future<void> _reloadMembers() async {
+    final members = await _service.getGroupMembers(widget.conversationId);
+    if (mounted) setState(() => _members = members);
   }
 
   Future<void> _addMember() async {
@@ -133,12 +198,80 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
       await _service.addGroupMembers(
           widget.conversationId, selected.map((u) => u.id).toList());
       _snack('${selected.length} üye eklendi');
-      await _loadMembers();
+      await _reloadMembers();
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
   }
 
+  // ---------- Ayrılma ----------
+  Future<void> _leaveGroup() async {
+    final others = _members.where((m) => m.id != _myId).toList();
+
+    if (_isAdmin && others.isNotEmpty) {
+      // Yönetici ayrılmadan önce yetkiyi bir üyeye devretmeli
+      final newAdmin = await showModalBottomSheet<Profile>(
+        context: context,
+        backgroundColor: AppTheme.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.only(bottom: 12),
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Yöneticiliği kime devretmek istersiniz?',
+                  style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold),
+                ),
+              ),
+              ...others.map((m) => ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: AppTheme.primary,
+                      child: Text(m.initial,
+                          style: const TextStyle(color: Colors.white)),
+                    ),
+                    title: Text(m.username,
+                        style: const TextStyle(color: AppTheme.textPrimary)),
+                    onTap: () => Navigator.pop(ctx, m),
+                  )),
+            ],
+          ),
+        ),
+      );
+      if (newAdmin == null) return;
+      try {
+        await _service.transferGroupAdmin(widget.conversationId, newAdmin.id);
+      } catch (e) {
+        _snack('Devredilemedi: $e', isError: true);
+        return;
+      }
+    } else {
+      final ok = await _confirm(
+        title: 'Gruptan ayrıl',
+        content: 'Bu gruptan ayrılmak istediğinize emin misiniz?',
+        confirm: 'Ayrıl',
+        isDanger: true,
+      );
+      if (ok != true) return;
+    }
+
+    try {
+      await _service.leaveGroupRpc(widget.conversationId);
+      if (!mounted) return;
+      Navigator.pop(context, kGroupLeft);
+    } catch (e) {
+      _snack('Hata: $e', isError: true);
+    }
+  }
+
+  // ---------- Yardımcılar ----------
   void _snack(String msg, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -180,6 +313,43 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
     );
   }
 
+  void _memberOptions(Profile member) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.admin_panel_settings_outlined,
+                  color: AppTheme.primary),
+              title: const Text('Yönetici yap',
+                  style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _makeAdmin(member);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_remove_outlined,
+                  color: Colors.redAccent),
+              title: const Text('Gruptan çıkar',
+                  style: TextStyle(color: Colors.redAccent)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _removeMember(member);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -204,15 +374,50 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 children: [
                   Center(
-                    child: Container(
-                      width: 96,
-                      height: 96,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.primary,
-                        shape: BoxShape.circle,
+                    child: GestureDetector(
+                      onTap: _isAdmin && !_isBusy ? _changeAvatar : null,
+                      child: Stack(
+                        children: [
+                          CircleAvatar(
+                            radius: 48,
+                            backgroundColor: AppTheme.primary,
+                            backgroundImage: _avatarUrl != null
+                                ? CachedNetworkImageProvider(_avatarUrl!)
+                                : null,
+                            child: _avatarUrl == null
+                                ? const Icon(Icons.groups,
+                                    size: 48, color: Colors.white)
+                                : null,
+                          ),
+                          if (_isAdmin)
+                            Positioned(
+                              right: 0,
+                              bottom: 0,
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.surface,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: AppTheme.background, width: 2),
+                                ),
+                                child: const Icon(Icons.camera_alt,
+                                    size: 16, color: AppTheme.textSecondary),
+                              ),
+                            ),
+                          if (_isBusy)
+                            const Positioned.fill(
+                              child: Center(
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                      child: const Icon(Icons.groups,
-                          size: 48, color: Colors.white),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -251,16 +456,6 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                           color: AppTheme.textSecondary, fontSize: 14),
                     ),
                   ),
-                  if (_isSaving)
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(8),
-                        child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2)),
-                      ),
-                    ),
                   const SizedBox(height: 20),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -288,7 +483,8 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                   ),
                   ..._members.map((member) {
                     final isMe = member.id == _myId;
-                    final isCreator = member.id == widget.createdBy;
+                    final isAdminMember = member.id == _adminId;
+                    final canManage = _isAdmin && !isMe;
                     return ListTile(
                       leading: CircleAvatar(
                         backgroundColor: AppTheme.primary,
@@ -312,7 +508,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                                   fontWeight: FontWeight.w500),
                             ),
                           ),
-                          if (isCreator)
+                          if (isAdminMember)
                             const Padding(
                               padding: EdgeInsets.only(left: 8),
                               child: Text('Yönetici',
@@ -323,12 +519,12 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                             ),
                         ],
                       ),
-                      trailing: (_isAdmin && !isMe && !isCreator)
+                      trailing: canManage
                           ? IconButton(
-                              tooltip: 'Gruptan çıkar',
-                              icon: const Icon(Icons.person_remove_outlined,
-                                  color: Colors.redAccent),
-                              onPressed: () => _removeMember(member),
+                              tooltip: 'Seçenekler',
+                              icon: const Icon(Icons.more_vert,
+                                  color: AppTheme.textSecondary),
+                              onPressed: () => _memberOptions(member),
                             )
                           : null,
                     );
@@ -337,7 +533,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: OutlinedButton.icon(
-                      onPressed: _leaveGroup,
+                      onPressed: _isBusy ? null : _leaveGroup,
                       icon: const Icon(Icons.exit_to_app),
                       label: const Text('Gruptan ayrıl'),
                       style: OutlinedButton.styleFrom(
