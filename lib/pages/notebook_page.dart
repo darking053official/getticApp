@@ -21,6 +21,7 @@ import 'vault_gate.dart';
 import '../services/cloud_notebook.dart';
 import '../services/cloud_vaults.dart';
 import '../services/web_crypto.dart';
+import '../services/secure_screen.dart';
 
 const String _kNotebookLogo = 'assets/getticnotebook_logo.png';
 const String _kTabAll = '__all__';
@@ -142,6 +143,7 @@ class _NotebookBodyState extends State<_NotebookBody> {
   @override
   void initState() {
     super.initState();
+    SecureScreen.set(true);
     _load();
   }
 
@@ -300,6 +302,12 @@ class _NotebookBodyState extends State<_NotebookBody> {
   }
 
   // ---------- Görünüm ----------
+  @override
+  void dispose() {
+    SecureScreen.set(false);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.appColors;
