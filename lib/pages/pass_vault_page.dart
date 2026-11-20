@@ -23,6 +23,7 @@ import '../core/security.dart';
 import '../core/theme.dart';
 import '../services/cloud_pass.dart';
 import '../services/web_crypto.dart';
+import '../services/secure_screen.dart';
 import 'vault_gate.dart';
 
 const String _kPassLogo = 'assets/getticpass_logo.png';
@@ -235,6 +236,7 @@ class _PassBodyState extends State<_PassBody> {
   @override
   void initState() {
     super.initState();
+    SecureScreen.set(true);
     _loadItems();
   }
 
@@ -387,6 +389,12 @@ class _PassBodyState extends State<_PassBody> {
   }
 
   // ---------- Görünüm ----------
+  @override
+  void dispose() {
+    SecureScreen.set(false);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.appColors;
