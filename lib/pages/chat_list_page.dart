@@ -195,7 +195,8 @@ class _ChatListPageState extends State<ChatListPage>
     if (!mounted) return;
     if (payload.eventType == PostgresChangeEvent.insert) {
       unawaited(_desktopNotifyIfNeeded(payload.newRecord));
-      if (_applyInsert(payload.newRecord)) return; // bildirim: sunucu push'u gönderir
+      // Şifreli mesajlar yerel olarak uygulanamaz (içerik çözülmeli): tam yenileme
+      if (payload.newRecord['enc'] == null && _applyInsert(payload.newRecord)) return; // bildirim: sunucu push'u gönderir
     }
     _scheduleReload();
   }
@@ -285,6 +286,7 @@ class _ChatListPageState extends State<ChatListPage>
 
   String _recordPreview(Map<String, dynamic> rec) {
     if (rec['is_deleted'] == true) return 'Bu mesaj silindi';
+    if (rec['enc'] != null) return 'Yeni mesaj';
     switch ((rec['type'] ?? 'text').toString()) {
       case 'image':
         return 'Fotoğraf';
