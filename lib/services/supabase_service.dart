@@ -1,10 +1,12 @@
 // lib/services/supabase_service.dart
+// (.txt olarak verildi. Projeye eklerken adını supabase_service.dart yapın.)
 
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/constants.dart';
 import '../models/profile.dart';
 import '../models/message.dart';
+import 'e2ee_chat.dart';
 
 class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
@@ -202,7 +204,9 @@ class SupabaseService {
         result.add({
           'conversation_id': convId,
           'other_user': otherMember?['profiles'],
-          'last_message': lastMsg,
+          'last_message': lastMsg == null
+              ? null
+              : await E2eeChat.instance.decryptedRow(Map<String, dynamic>.from(lastMsg)),
           'unread_count': unread,
           'is_group': convData?['type'] == 'group',
           'group_name': convData?['name'],
@@ -419,15 +423,18 @@ class SupabaseService {
         .stream(primaryKey: ['id'])
         .eq('conversation_id', conversationId)
         .order('created_at', ascending: true)
-        .map((data) => data
-            .where((j) {
-              final e = j['expires_at'];
-              if (e == null) return true;
+        .asyncMap((data) async {
+          final out = <Message>[];
+          for (final j in data) {
+            final e = j['expires_at'];
+            if (e != null) {
               final t = DateTime.tryParse(e.toString());
-              return t == null || t.isAfter(DateTime.now().toUtc());
-            })
-            .map((json) => Message.fromJson(json))
-            .toList());
+              if (t != null && !t.isAfter(DateTime.now().toUtc())) continue;
+            }
+            out.add(await E2eeChat.instance.toMessage(Map<String, dynamic>.from(j)));
+          }
+          return out;
+        });
   }
 
   /// Metin mesajı gönderir
@@ -436,10 +443,14 @@ class SupabaseService {
     if (currentUser == null) throw Exception('Giriş yapmalısınız');
     if (content.trim().isEmpty) throw Exception('Boş mesaj gönderilemez');
 
+    final enc = await E2eeChat.instance.encrypt(conversationId, content.trim());
+
     final inserted = await _client.from(AppConstants.tableMessages).insert({
       'conversation_id': conversationId,
       'sender_id': currentUser!.id,
-      'content': content.trim(),
+      'content': enc == null ? content.trim() : null,
+      'enc': enc,
+      'enc_version': enc == null ? null : 1,
       'type': 'text',
       'forwarded': forwarded,
       if (replyToId != null) 'reply_to': replyToId,
@@ -666,7 +677,26 @@ class SupabaseService {
 
   Future<void> editMessage(String messageId, String newContent) async {
     if (currentUser == null) return;
-    if (newContent.trim().isEmpty) throw Exception('Boş mesaj olamaz');
+    if (newContent.trim().isEmpty) throw Exception('Bo\u015f mesaj olamaz');
+    final row = await _client
+        .from(AppConstants.tableMessages)
+        .select('conversation_id, enc_version')
+        .eq('id', messageId)
+        .maybeSingle();
+    if (row != null && row['enc_version'] != null) {
+      final enc = await E2eeChat.instance
+          .encrypt(row['conversation_id'].toString(), newContent.trim());
+      if (enc != null) {
+        await _client.from(AppConstants.tableMessages).update({
+          'enc': enc,
+          'enc_version': 1,
+          'content': null,
+          'is_edited': true,
+          'edited_at': DateTime.now().toIso8601String(),
+        }).eq('id', messageId);
+        return;
+      }
+    }
     await _client.from(AppConstants.tableMessages).update({
       'content': newContent.trim(),
       'is_edited': true,
