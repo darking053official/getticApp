@@ -758,12 +758,28 @@ class _MeetCallPageState extends State<MeetCallPage> {
   // ----------------------------------------------------------
   // Görünüm
   // ----------------------------------------------------------
+  /// Geri tuşu: ekran paylaşımı sürerken görüşmeyi kapatmaz.
+  void _onBack(bool didPop) {
+    if (didPop) return;
+    if (_sharing) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Ekran paylaşımı sürüyor. Görüşmeyi bitirmek için kapat düğmesini kullanın.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.appColors;
     final hasRemote = _remoteView.srcObject != null || _screenView.srcObject != null;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: _onBack,
+      child: Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
@@ -873,7 +889,7 @@ class _MeetCallPageState extends State<MeetCallPage> {
           ],
         ),
       ),
-    );
+    ));
   }
 
   Widget _circle({required IconData icon, required VoidCallback onTap, required Color color}) {
