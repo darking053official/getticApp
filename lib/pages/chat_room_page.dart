@@ -27,6 +27,7 @@ import '../services/supabase_service.dart';
 import '../services/storage_service.dart';
 import 'profile_preview.dart';
 import 'group_info_page.dart';
+import '../services/chat_outbox.dart';
 
 // ============================================================
 // AYARLAR
@@ -326,6 +327,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   String? _pinnedId;
   RealtimeChannel? _reactChannel;
   RealtimeChannel? _metaChannel;
+  // Parti 2: oda ayarları
+  bool _muted = false;
+  int? _disappear;
+  String? _wallpaper;
+  Timer? _outboxTimer;
   Map<String, String> _memberNames = {};
   String? _groupNameOverride;
 
@@ -339,6 +345,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     _refreshOtherReadAt();
     _loadPinned();
     _subscribeReactionsAndPins();
+    _loadRoomSettings();
+    _flushOutbox();
+    _outboxTimer = Timer.periodic(const Duration(seconds: 15), (_) => _flushOutbox());
     if (widget.isGroup) _loadGroupMembers();
     _readPoll = Timer.periodic(
         const Duration(seconds: 15), (_) => _refreshOtherReadAt());
@@ -437,6 +446,184 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           onTap: () => _insertEmoji(_kEmojis[i]),
           child: Center(
             child: Text(_kEmojis[i], style: const TextStyle(fontSize: 24)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ==========================================
+  // PARTİ 2: SOHBET AYARLARI, KUYRUK, ARKA PLAN
+  // ==========================================
+  String get _wallpaperKey => 'chat_wallpaper_${widget.conversationId}';
+
+  Future<void> _loadRoomSettings() async {
+    try {
+      final muted = await _service.getMuted(widget.conversationId);
+      final secs = await _service.getDisappearing(widget.conversationId);
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        _muted = muted;
+        _disappear = secs;
+        _wallpaper = prefs.getString(_wallpaperKey);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _flushOutbox() async {
+    await ChatOutbox.instance.flush(_service, conversationId: widget.conversationId);
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  BoxDecoration? _wallpaperDecoration() {
+    final p = _wallpaper;
+    if (p == null || !File(p).existsSync()) return null;
+    return BoxDecoration(
+      image: DecorationImage(
+        image: FileImage(File(p)),
+        fit: BoxFit.cover,
+        colorFilter:
+            ColorFilter.mode(Colors.black.withOpacity(0.35), BlendMode.darken),
+      ),
+    );
+  }
+
+  Future<void> _pickWallpaper() async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1600,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_wallpaperKey, picked.path);
+    if (mounted) setState(() => _wallpaper = picked.path);
+  }
+
+  Future<void> _removeWallpaper() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_wallpaperKey);
+    if (mounted) setState(() => _wallpaper = null);
+  }
+
+  String _disappearLabel(int? secs) {
+    if (secs == null) return 'Kapalı';
+    if (secs == 86400) return '24 saat';
+    if (secs == 604800) return '7 gün';
+    return '$secs sn';
+  }
+
+  void _showRoomSettings() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.inputBorder,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.timer_outlined, color: AppTheme.primary),
+                title: const Text('Kaybolan mesajlar',
+                    style: TextStyle(color: AppTheme.textPrimary)),
+                subtitle: Text(_disappearLabel(_disappear),
+                    style: const TextStyle(color: AppTheme.textSecondary)),
+                onTap: () async {
+                  final picked = await showModalBottomSheet<int?>(
+                    context: ctx,
+                    backgroundColor: AppTheme.surface,
+                    builder: (c2) => SafeArea(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final opt in <MapEntry<String, int?>>[
+                            const MapEntry('Kapalı', null),
+                            const MapEntry('24 saat', 86400),
+                            const MapEntry('7 gün', 604800),
+                          ])
+                            ListTile(
+                              title: Text(opt.key,
+                                  style: const TextStyle(
+                                      color: AppTheme.textPrimary)),
+                              trailing: _disappear == opt.value
+                                  ? const Icon(Icons.check,
+                                      color: AppTheme.primary)
+                                  : null,
+                              onTap: () => Navigator.pop(c2, opt.value),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                  if (!mounted) return;
+                  if (picked != _disappear || picked == null) {
+                    try {
+                      await _service.setDisappearing(widget.conversationId, picked);
+                      if (!mounted) return;
+                      setState(() => _disappear = picked);
+                      setS(() {});
+                      _showSnack('Kaybolan mesaj: ${_disappearLabel(picked)}');
+                    } catch (e) {
+                      _showSnack('Hata: $e', isError: true);
+                    }
+                  }
+                },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.notifications_off_outlined,
+                    color: AppTheme.primary),
+                activeColor: AppTheme.primary,
+                title: const Text('Sessize al',
+                    style: TextStyle(color: AppTheme.textPrimary)),
+                subtitle: const Text('Bu sohbetten bildirim gelmez',
+                    style: TextStyle(color: AppTheme.textSecondary)),
+                value: _muted,
+                onChanged: (v) async {
+                  try {
+                    await _service.setMuted(widget.conversationId, v);
+                    if (!mounted) return;
+                    setState(() => _muted = v);
+                    setS(() {});
+                  } catch (e) {
+                    _showSnack('Hata: $e', isError: true);
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.wallpaper, color: AppTheme.primary),
+                title: const Text('Sohbet arka planı',
+                    style: TextStyle(color: AppTheme.textPrimary)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _pickWallpaper();
+                },
+              ),
+              if (_wallpaper != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  title: const Text('Arka planı kaldır',
+                      style: TextStyle(color: Colors.redAccent)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _removeWallpaper();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
           ),
         ),
       ),
@@ -1033,11 +1220,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       await _service.sendMessage(widget.conversationId, text,
           replyToId: reply?.id);
     } catch (e) {
+      // Çevrimdışıysa mesajı kuyruğa al, bağlantı gelince otomatik gönderilir
+      await ChatOutbox.instance.add(widget.conversationId, text, reply?.id);
       if (mounted) {
-        _controller.text = text;
-        _controller.selection = TextSelection.collapsed(offset: text.length);
-        setState(() => _replyTo = reply);
-        _showSnack('Mesaj gönderilemedi: $e', isError: true);
+        setState(() => _replyTo = null);
+        _showSnack('Bağlantı yok. Mesaj bağlantı gelince gönderilecek');
       }
     } finally {
       if (mounted) setState(() => _isSending = false);
@@ -1762,6 +1949,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     _readChannel?.unsubscribe();
     _reactChannel?.unsubscribe();
     _metaChannel?.unsubscribe();
+    _outboxTimer?.cancel();
     _service.unsubscribeTyping(widget.conversationId);
     _controller.dispose();
     _scroll.dispose();
@@ -1783,7 +1971,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             child: _isLoading
                 ? const Center(
                     child: CircularProgressIndicator(color: AppTheme.primary))
-                : _buildMessagesList(),
+                : Container(
+                    decoration: _wallpaperDecoration(),
+                    child: _buildMessagesList(),
+                  ),
           ),
 
           _buildPinnedBanner(),
@@ -1855,6 +2046,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       elevation: 0,
       titleSpacing: 0,
       actions: [
+        IconButton(
+          tooltip: 'Sohbet ayarları',
+          icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary),
+          onPressed: _showRoomSettings,
+        ),
         IconButton(
           tooltip: 'Mesajlarda ara',
           icon: const Icon(Icons.search, color: AppTheme.textSecondary),
@@ -2207,9 +2403,20 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       case 'file':
         return _mediaFile(msg, textColor);
       default:
-        return Text(
-          msg.content ?? '',
+        final text = msg.content ?? '';
+        final link = RegExp(r'https?://[^\s]+').firstMatch(text)?.group(0);
+        final body = Text(
+          text,
           style: TextStyle(color: textColor, fontSize: 15),
+        );
+        if (link == null) return body;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            body,
+            _LinkPreviewCard(url: link, textColor: textColor),
+          ],
         );
     }
   }
@@ -2365,6 +2572,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       key: ValueKey('audio_${msg.id}'),
       urlLoader: () => _resolveMediaUrl(path),
       color: textColor,
+      seed: msg.id.toString(),
     );
   }
 
@@ -2642,10 +2850,12 @@ class _SwipeToReplyState extends State<_SwipeToReply> {
 class _AudioPlayerTile extends StatefulWidget {
   final Future<String?> Function() urlLoader;
   final Color color;
+  final String seed;
   const _AudioPlayerTile({
     super.key,
     required this.urlLoader,
     required this.color,
+    required this.seed,
   });
 
   @override
@@ -2792,9 +3002,11 @@ class _AudioPlayerTileState extends State<_AudioPlayerTile> {
                         inactiveTrackColor: widget.color.withOpacity(0.3),
                         thumbColor: widget.color,
                       ),
-                      child: Slider(
-                        value: value,
-                        onChanged: _loaded && total > 0
+                      child: _Waveform(
+                        seed: widget.seed,
+                        progress: value,
+                        color: widget.color,
+                        onSeek: _loaded && total > 0
                             ? (v) => _player.seek(
                                 Duration(milliseconds: (v * total).round()))
                             : null,
@@ -3385,6 +3597,173 @@ class _TypingDotsState extends State<_TypingDots>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [dot(0), dot(1), dot(2)],
+          ),
+        );
+      },
+    );
+  }
+}
+
+
+// ============================================================
+// SES DALGA FORMU (görsel; mesaja özgü, dokunarak ileri sarma)
+// ============================================================
+class _Waveform extends StatelessWidget {
+  final String seed;
+  final double progress;
+  final Color color;
+  final void Function(double)? onSeek;
+
+  const _Waveform({
+    required this.seed,
+    required this.progress,
+    required this.color,
+    this.onSeek,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, c) {
+      void seekAt(double dx) {
+        if (onSeek == null || c.maxWidth <= 0) return;
+        onSeek!((dx / c.maxWidth).clamp(0.0, 1.0));
+      }
+
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (d) => seekAt(d.localPosition.dx),
+        onHorizontalDragUpdate: (d) => seekAt(d.localPosition.dx),
+        child: SizedBox(
+          height: 28,
+          width: double.infinity,
+          child: CustomPaint(
+            painter: _WavePainter(seed: seed, progress: progress, color: color),
+          ),
+        ),
+      );
+    });
+  }
+}
+
+class _WavePainter extends CustomPainter {
+  final String seed;
+  final double progress;
+  final Color color;
+
+  _WavePainter({required this.seed, required this.progress, required this.color});
+
+  static const int _bars = 36;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final barW = size.width / _bars;
+    final played = Paint()..color = color;
+    final idle = Paint()..color = color.withOpacity(0.35);
+    final h = seed.codeUnits.fold<int>(7, (a, b) => (a * 31 + b) & 0x7fffffff);
+    for (var i = 0; i < _bars; i++) {
+      // Mesaja özgü, sabit ama doğal görünen yükseklikler
+      final v = ((h ^ (i * 2654435761 & 0x7fffffff)) % 70 + 30) / 100.0;
+      final barH = size.height * v;
+      final x = i * barW + barW * 0.2;
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(x, (size.height - barH) / 2, barW * 0.6, barH),
+        const Radius.circular(2),
+      );
+      canvas.drawRRect(rect, (i / _bars) <= progress ? played : idle);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _WavePainter old) =>
+      old.progress != progress || old.seed != seed || old.color != color;
+}
+
+// ============================================================
+// BAĞLANTI ÖNİZLEME KARTI
+// ============================================================
+class _LinkPreviewCard extends StatefulWidget {
+  final String url;
+  final Color textColor;
+  const _LinkPreviewCard({required this.url, required this.textColor});
+
+  @override
+  State<_LinkPreviewCard> createState() => _LinkPreviewCardState();
+}
+
+class _LinkPreviewCardState extends State<_LinkPreviewCard> {
+  late final Future<Map<String, dynamic>?> _future =
+      SupabaseService().linkPreview(widget.url);
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _future,
+      builder: (context, snap) {
+        final d = snap.data;
+        if (d == null) return const SizedBox.shrink();
+        final title = (d['title'] ?? '').toString();
+        final desc = (d['description'] ?? '').toString();
+        final image = d['image']?.toString();
+        if (title.isEmpty && image == null) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () {
+              Clipboard.setData(ClipboardData(text: widget.url));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Bağlantı kopyalandı'),
+                behavior: SnackBarBehavior.floating,
+              ));
+            },
+            child: Container(
+              width: 220,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.18),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (image != null && image.isNotEmpty)
+                    Image.network(image,
+                        height: 110,
+                        width: 220,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (title.isNotEmpty)
+                          Text(title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: widget.textColor,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600)),
+                        if (desc.isNotEmpty)
+                          Text(desc,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: widget.textColor.withOpacity(0.8),
+                                  fontSize: 12)),
+                        Text((d['site'] ?? '').toString(),
+                            style: TextStyle(
+                                color: widget.textColor.withOpacity(0.6),
+                                fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
