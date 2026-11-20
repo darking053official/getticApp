@@ -2391,6 +2391,17 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       );
     }
 
+    if (msg.decryptFailed) {
+      return Text(
+        'Şifreli mesaj, bu cihazda çözülemiyor',
+        style: TextStyle(
+          color: textColor.withOpacity(0.7),
+          fontStyle: FontStyle.italic,
+          fontSize: 14,
+        ),
+      );
+    }
+
     switch (msg.type) {
       case 'image':
       case 'gif':
