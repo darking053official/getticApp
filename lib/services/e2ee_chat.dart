@@ -2,7 +2,10 @@
 // lib/services/e2ee_chat.dart
 // (.txt olarak verildi. Projeye eklerken adını e2ee_chat.dart yapın.)
 //
-// Aşama 2: 1:1 sohbet şifrelemesi.
+// Aşama 2-3: 1:1 ve grup sohbeti şifrelemesi.
+//  - Grup/1:1 anahtarı sürümlü. Üyelik değişince (ekleme, çıkarma, yeni cihaz) yeni sürüm üretilir.
+//  - Yeni sürüm yalnızca güncel üyelerin cihazlarına sarılır: çıkarılan kişi yeni mesajları okuyamaz.
+//  - Yeni eklenen üye geçmişi görmez; yalnızca eklendikten sonraki sürümü alır.
 //  - Sohbet anahtarı: 32 bayt rastgele, sohbeti ilk gönderen cihaz üretir.
 //  - Sohbet anahtarı, sohbetteki her cihaz için ECDH (X25519) + HKDF + XChaCha20-Poly1305
 //    ile sarılır ve e2ee_conversation_keys tablosuna yazılır.
@@ -107,23 +110,34 @@ class E2eeChat {
     );
   }
 
-  // ---------- Sohbet anahtarı ----------
+  // ---------- Sohbet anahtarı (sürümlü) ----------
 
-  /// Bu cihazın sohbet anahtarını döndürür (yoksa null).
-  Future<_KeyRef?> _myKey(String convId, DeviceIdentity me) async {
-    final row = await _sb
-        .from('e2ee_conversation_keys')
-        .select('key_version')
-        .eq('conversation_id', convId)
-        .eq('device_id', me.deviceId)
-        .order('key_version', ascending: false)
-        .limit(1)
-        .maybeSingle();
-    if (row == null) return null;
-    final kv = (row['key_version'] as num).toInt();
-    final key = await _loadKey(convId, kv, me);
-    if (key == null) return null;
-    return _KeyRef(kv, key);
+  /// Güncel alıcı cihazlar (iptal edilmemiş, sohbet üyelerinin cihazları).
+  Future<List<Map<String, dynamic>>> _recipientDevices(String convId) async {
+    final members = await _sb
+        .from('conversation_members')
+        .select('user_id')
+        .eq('conversation_id', convId);
+    final userIds =
+        (members as List).map((m) => m['user_id'].toString()).toList();
+    if (userIds.isEmpty) return [];
+    final devices = await _sb
+        .from('devices')
+        .select('id, identity_pub_x25519')
+        .inFilter('user_id', userIds)
+        .isFilter('revoked_at', null);
+    return List<Map<String, dynamic>>.from(devices as List);
+  }
+
+  Future<int?> _latestKeyVersion(String convId) async {
+    final v = await _sb.rpc('e2ee_latest_key_version', params: {'p_conv': convId});
+    return v == null ? null : (v as num).toInt();
+  }
+
+  Future<Set<String>> _keyRecipients(String convId, int kv) async {
+    final rows = await _sb.rpc('e2ee_key_recipients',
+        params: {'p_conv': convId, 'p_kv': kv});
+    return (rows as List).map((r) => r['device_id'].toString()).toSet();
   }
 
   Future<List<int>?> _loadKey(String convId, int kv, DeviceIdentity me) async {
@@ -155,26 +169,42 @@ class E2eeChat {
     return key;
   }
 
-  /// Sohbetin yeni anahtarını üretir ve bu sohbetteki tüm (iptal edilmemiş) cihazlara sarar.
-  /// Karşı tarafın cihazı yoksa null döner.
-  Future<_KeyRef?> _createKey(String convId, DeviceIdentity me) async {
-    final members = await _sb
-        .from('conversation_members')
-        .select('user_id')
-        .eq('conversation_id', convId);
-    final userIds = (members as List).map((m) => m['user_id'].toString()).toList();
-    if (userIds.isEmpty) return null;
+  /// Güncel anahtarı verir. Üyelik değiştiyse yeni sürüm üretir.
+  Future<_KeyRef?> _ensureCurrentKey(String convId, DeviceIdentity me) async {
+    final devices = await _recipientDevices(convId);
+    if (devices.isEmpty) return null; // E2EE cihazı olan alıcı yok
 
-    final devices = await _sb
-        .from('devices')
-        .select('id, identity_pub_x25519')
-        .inFilter('user_id', userIds)
-        .isFilter('revoked_at', null);
-    if ((devices as List).isEmpty) return null;
+    final wanted = devices.map((d) => d['id'].toString()).toSet();
+    final latest = await _latestKeyVersion(convId);
 
+    if (latest == null) {
+      return _createKey(convId, me, 1, devices);
+    }
+
+    final recipients = await _keyRecipients(convId, latest);
+    final upToDate = recipients.length == wanted.length &&
+        recipients.containsAll(wanted);
+    if (upToDate) {
+      final key = await _loadKey(convId, latest, me);
+      if (key != null) return _KeyRef(latest, key);
+    }
+    // Üyelik değişti veya bu cihaz güncel sürüme sarılı değil: yeni sürüm
+    return _createKey(convId, me, latest + 1, devices);
+  }
+
+  /// Üyelik değişikliğinden sonra çağrılır (yönetici ekleme/çıkarma yaptığında).
+  Future<void> rotateIfNeeded(String convId) async {
+    try {
+      final me = await E2eeDevice.instance.ensureIdentity();
+      await _ensureCurrentKey(convId, me);
+    } catch (_) {}
+  }
+
+  /// Yeni anahtar sürümü üretir ve verilen cihazlara sarar.
+  Future<_KeyRef?> _createKey(String convId, DeviceIdentity me, int kv,
+      List<Map<String, dynamic>> devices) async {
     final keyObj = await _aead.newSecretKey();
     final keyBytes = await keyObj.extractBytes();
-    const kv = 1;
 
     final inserts = <Map<String, dynamic>>[];
     for (final d in devices) {
@@ -202,8 +232,10 @@ class E2eeChat {
     try {
       await _sb.from('e2ee_conversation_keys').insert(inserts);
     } catch (_) {
-      // Aynı anda başka cihaz da anahtar üretmiş olabilir: mevcut olanı kullan
-      return _myKey(convId, me);
+      // Aynı anda başka üye aynı sürümü üretmiş olabilir: onun anahtarını dene
+      final existing = await _loadKey(convId, kv, me);
+      if (existing != null) return _KeyRef(kv, existing);
+      rethrow;
     }
     _keyCache['$convId|$kv'] = keyBytes;
     return _KeyRef(kv, keyBytes);
@@ -219,7 +251,7 @@ class E2eeChat {
   /// Metni şifreler ve zarfı döndürür. Karşı tarafın E2EE cihazı yoksa null.
   Future<Map<String, dynamic>?> encrypt(String convId, String text) async {
     final me = await E2eeDevice.instance.ensureIdentity();
-    final ref = (await _myKey(convId, me)) ?? (await _createKey(convId, me));
+    final ref = await _ensureCurrentKey(convId, me);
     if (ref == null) return null;
 
     final aad = _aad(convId, ref.kv, me.deviceId);
