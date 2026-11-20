@@ -324,10 +324,27 @@ class E2eeChat {
 
     final enc = Map<String, dynamic>.from(row['enc'] as Map);
     final text = await decryptEnvelope(row['conversation_id'].toString(), enc);
+
+    // Medya mesajında payload {"t": açıklama, "m": {k, n, a, type, name}} biçimindedir
+    String content = text ?? '';
+    Map<String, dynamic>? mediaSecret;
+    if (text != null) {
+      try {
+        final p = jsonDecode(text);
+        if (p is Map && p['m'] is Map) {
+          content = (p['t'] ?? '').toString();
+          mediaSecret = Map<String, dynamic>.from(p['m'] as Map);
+        }
+      } catch (_) {
+        // düz metin mesaj
+      }
+    }
+
     final msg = Message.fromJson({
       ...row,
-      'content': text ?? '',
+      'content': content,
       'decrypt_failed': text == null,
+      'media_secret': mediaSecret,
     });
     if (text != null) _messageCache[id] = msg;
     return msg;
