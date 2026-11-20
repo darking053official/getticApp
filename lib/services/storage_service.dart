@@ -2,6 +2,7 @@
 // Supabase Storage yardımcıları.
 //  - Sohbet medyası (düz, şifresiz): uploadChatMedia. GIF, grup fotoğrafı gibi
 //    şifrelenmeyen dosyalar için kullanılır. Şifreli medya için E2eeMedia kullanılır.
+//  - Profil fotoğrafı: uploadAvatar (avatars bucket, herkese açık).
 //  - Başarısızlık durumunda null döner (çağıran taraf kendi hata mesajını gösterir).
 
 import 'dart:io';
@@ -14,11 +15,36 @@ class StorageService {
   StorageService();
 
   static const String chatBucket = 'chat-media';
+  static const String avatarBucket = 'avatars';
 
   /// Chat medyası için en fazla boyut (bayt). Üstü reddedilir.
   static const int maxChatMediaBytes = 25 * 1024 * 1024;
 
   final SupabaseClient _client = Supabase.instance.client;
+
+  /// Profil fotoğrafını 'avatars' bucket'ına yükler ve herkese açık URL döndürür.
+  Future<String?> uploadAvatar(File file, String userId) async {
+    try {
+      final ext = _extensionOf(file.path).isEmpty
+          ? 'jpg'
+          : _extensionOf(file.path);
+      final path =
+          '$userId/avatar_${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+      await _client.storage.from(avatarBucket).upload(
+            path,
+            file,
+            fileOptions: FileOptions(
+              upsert: true,
+              contentType: _mimeFor(ext),
+            ),
+          );
+      return _client.storage.from(avatarBucket).getPublicUrl(path);
+    } catch (e) {
+      debugPrint('Avatar yükleme hatası: $e');
+      return null;
+    }
+  }
 
   /// Dosyayı sohbet klasörüne yükler. Dönüş: storage yolu, hata varsa null.
   /// Yol biçimi: <conversationId>/<type>/<rastgele>.<uzantı>
