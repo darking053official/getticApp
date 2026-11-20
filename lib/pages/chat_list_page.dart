@@ -54,7 +54,6 @@ class _ChatListPageState extends State<ChatListPage>
   final _service = SupabaseService();
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
-  late final TabController _tabController;
   late final AnimationController _pulse;
 
   // Ham veri
@@ -72,7 +71,6 @@ class _ChatListPageState extends State<ChatListPage>
   bool _loading = true;
   String? _error;
   int _currentIndex = 0; // 0 Sohbetler, 1 Arşiv, 2 Ayarlar
-  int _lastTabIndex = 0;
 
   RealtimeChannel? _channel;
   Timer? _reloadTimer;
@@ -96,14 +94,6 @@ class _ChatListPageState extends State<ChatListPage>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
-
-    _tabController = TabController(length: 2, vsync: this);
-    _tabController.addListener(() {
-      if (_tabController.index != _lastTabIndex) {
-        _lastTabIndex = _tabController.index;
-        if (mounted) setState(_rebuildView);
-      }
-    });
 
     _searchFocus.addListener(() {
       if (mounted) setState(() {});
@@ -136,7 +126,6 @@ class _ChatListPageState extends State<ChatListPage>
     _pulse.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
-    _tabController.dispose();
     super.dispose();
   }
 
@@ -418,7 +407,6 @@ class _ChatListPageState extends State<ChatListPage>
   void _rebuildView() {
     final q = _query.trim().toLowerCase();
     final showArchive = _currentIndex == 1;
-    final groupsTab = _tabController.index == 1;
 
     var direct = 0;
     var groups = 0;
@@ -439,7 +427,6 @@ class _ChatListPageState extends State<ChatListPage>
       }
 
       if (archived != showArchive) continue;
-      if (!showArchive && isGroup != groupsTab) continue;
 
       if (q.isNotEmpty) {
         final name =
@@ -452,6 +439,10 @@ class _ChatListPageState extends State<ChatListPage>
     }
 
     list.sort((a, b) {
+      // Önce gruplar, sonra birebir sohbetler
+      final aGroup = a['is_group'] == true;
+      final bGroup = b['is_group'] == true;
+      if (aGroup != bGroup) return aGroup ? -1 : 1;
       final aPinned = _pinnedIds.contains(_idOf(a));
       final bPinned = _pinnedIds.contains(_idOf(b));
       if (aPinned != bPinned) return aPinned ? -1 : 1;
@@ -497,7 +488,7 @@ class _ChatListPageState extends State<ChatListPage>
     }
   }
 
-  /// Yeni grup oluşturma ekranını açar. Dönünce listeyi yenileyip Gruplar sekmesine geçer.
+  /// Yeni grup oluşturma ekranını açar. Dönünce listeyi yeniler.
   Future<void> _newGroup() async {
     final convId = await Navigator.push<String>(
       context,
@@ -506,7 +497,6 @@ class _ChatListPageState extends State<ChatListPage>
     if (!mounted) return;
     if (convId != null) {
       _snack('Grup oluşturuldu');
-      if (_tabController.index != 1) _tabController.animateTo(1);
     }
     _scheduleReload();
   }
@@ -831,7 +821,6 @@ class _ChatListPageState extends State<ChatListPage>
             children: [
               _buildHeader(c, archive),
               _buildSearchBar(c),
-              if (!archive) _buildTabs(c),
               const SizedBox(height: 8),
               Expanded(child: _buildList(c)),
             ],
@@ -933,66 +922,6 @@ class _ChatListPageState extends State<ChatListPage>
             _query = v;
             _rebuildView();
           }),
-        ),
-      ),
-    );
-  }
-
-  Widget _tabLabel(AppColors c, String text, int unread) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(text),
-        if (unread > 0) ...[
-          const SizedBox(width: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            decoration: BoxDecoration(
-              color: c.danger,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              unread > 99 ? '99+' : '$unread',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildTabs(AppColors c) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: c.surface,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: TabBar(
-          controller: _tabController,
-          indicator: BoxDecoration(
-            color: c.primary,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          indicatorSize: TabBarIndicatorSize.tab,
-          dividerColor: Colors.transparent,
-          labelColor: Colors.white,
-          unselectedLabelColor: c.textSecondary,
-          labelStyle:
-              const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-          unselectedLabelStyle:
-              const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-          tabs: [
-            Tab(child: _tabLabel(c, 'Sohbetler', _unreadDirect)),
-            Tab(child: _tabLabel(c, 'Gruplar', _unreadGroups)),
-          ],
         ),
       ),
     );
@@ -1121,7 +1050,6 @@ class _ChatListPageState extends State<ChatListPage>
   Widget _buildEmptyState(AppColors c) {
     final searching = _query.trim().isNotEmpty;
     final archive = _currentIndex == 1;
-    final groups = !archive && _tabController.index == 1;
 
     if (searching) {
       return _buildMessageState(c,
@@ -1134,14 +1062,6 @@ class _ChatListPageState extends State<ChatListPage>
           icon: Icons.archive_outlined,
           title: 'Arşiv boş',
           subtitle: 'Bir sohbeti sola kaydırarak arşivleyebilirsin.');
-    }
-    if (groups) {
-      return _buildMessageState(c,
-          icon: Icons.groups_outlined,
-          title: 'Henüz grup yok',
-          subtitle: 'Grup sohbetleri burada görünecek.',
-          actionLabel: 'Grup oluştur',
-          onAction: _newGroup);
     }
     return _buildMessageState(c,
         icon: Icons.chat_bubble_outline,
