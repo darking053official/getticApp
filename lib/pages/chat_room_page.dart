@@ -1770,7 +1770,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: ['👍', '❤️', '😂', '😮', '😢', '🙏']
-                      .map((e) => InkWell(
+                      .map<Widget>((e) => InkWell(
                             borderRadius: BorderRadius.circular(20),
                             onTap: () {
                               Navigator.pop(ctx);
