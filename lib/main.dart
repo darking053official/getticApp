@@ -1,11 +1,11 @@
 // ============================================================
 // lib/main.dart
-// (.txt olarak verildi. Projeye eklerken adını main.dart yapın.)
 //
 // Ayar bağlantıları:
 //  - Tema / yazı boyutu: AppSettings -> MaterialApp
 //  - Otomatik kilit: uygulama arka plana gidince AppSettings.autoLockMinutes kontrol edilir
 //  - Uygulama içi bildirim: AppSettings.inAppNotifications
+//  - Uygulama kilidi: AppLock (30 sn arka plan sonrası PIN)
 // ============================================================
 
 import 'dart:async';
@@ -27,6 +27,7 @@ import 'pages/auth_page.dart';
 import 'services/cloud_vaults.dart';
 import 'services/meet_service.dart';
 import 'services/chat_lock_service.dart';
+import 'services/app_lock.dart';
 import 'services/meet_push_handler.dart';
 import 'services/notification_service.dart';
 
@@ -41,6 +42,7 @@ const String oneSignalAppId = "87e2dd8a-b811-49f7-b637-589f3a74d6fe";
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppLock.instance.load();
 
   // Parola türetme işlemini yerel kripto kütüphanesine bağla (çok daha hızlı)
   FlutterCryptography.enable();
@@ -153,10 +155,13 @@ class _AppLifecycleObserver extends WidgetsBindingObserver {
       AppState().setAppInForeground(true);
       _applyAutoLock();
       MeetService.instance.onAppResumed();
+      final navCtx = appNavigatorKey.currentContext;
+      if (navCtx != null) AppLock.instance.onResume(navCtx);
     } else if (state == AppLifecycleState.paused) {
       AppState().setAppInForeground(false);
       _pausedAt = DateTime.now();
       ChatLock.instance.lockSession();
+      AppLock.instance.markPaused();
     }
   }
 
