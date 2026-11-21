@@ -122,6 +122,16 @@ class E2eeDevice {
     return approved;
   }
 
+  /// Yedekten geri yükleme sonrası: parolayı bilen bu cihazı onaylar.
+  Future<void> markApprovedSelf() async {
+    final me = await ensureIdentity();
+    await Supabase.instance.client
+        .from('devices')
+        .update({'approved_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', me.deviceId);
+    await refreshApproval();
+  }
+
   /// Cihaz kaydını siler (çıkışta veya anahtar sıfırlamada). Yerel anahtarlar da silinir.
   Future<void> forgetDevice() async {
     final id = await _read(_kDeviceId);
