@@ -29,6 +29,7 @@ import '../services/cloud_pass.dart';
 import '../services/cloud_vaults.dart';
 import '../services/app_lock.dart';
 import 'device_link_page.dart';
+import '../services/e2ee_backup.dart';
 import '../services/notification_privacy.dart';
 import '../services/web_crypto.dart';
 import '../services/supabase_service.dart';
@@ -806,6 +807,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 _section('Güvenlik', c),
                 _card(c, [
+                  _tile(c, Icons.backup_outlined, 'Anahtar yedeği',
+                      subtitle: 'Yedek parolası belirleyin ya da yedeği güncelleyin',
+                      onTap: () => showBackupSetupDialog(context)),
+                  _divider(c),
                   _tile(c, Icons.devices_outlined, 'Cihaz bağlama',
                       subtitle: 'Yeni cihazı onaylayın veya bu cihazı bağlayın',
                       onTap: () => Navigator.push(
