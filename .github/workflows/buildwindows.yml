@@ -39,6 +39,16 @@ jobs:
           $cacheDir = Join-Path $flutterRoot "bin\cache"
           Remove-Item -Path "$cacheDir\flutter_tools.stamp" -ErrorAction SilentlyContinue
           Remove-Item -Path "$cacheDir\flutter_tools.snapshot" -ErrorAction SilentlyContinue
+      - name: Install Visual Studio ATL (flutter_secure_storage_windows için)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -property installationPath
+          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          & $installer modify --installPath "$vsPath" --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw "ATL kurulamadı: $LASTEXITCODE" }
+          $atl = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Recurse -Filter atlstr.h -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $atl) { throw "atlstr.h bulunamadı" }
       - run: flutter pub get
       - run: flutter build windows --release
       - name: Sign Windows binaries (optional)
