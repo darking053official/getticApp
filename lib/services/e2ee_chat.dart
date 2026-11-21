@@ -263,7 +263,6 @@ class E2eeChat {
   /// Metni şifreler ve zarfı döndürür. Karşı tarafın E2EE cihazı yoksa null.
   Future<Map<String, dynamic>?> encrypt(String convId, String text) async {
     final me = await E2eeDevice.instance.ensureIdentity();
-    if (!me.approved) throw E2eePendingException();
     final ref = await _ensureCurrentKey(convId, me);
     if (ref == null) return null;
 
