@@ -987,7 +987,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         }
 
         _markIncomingAsRead(msgs, myId);
-        _loadReactions();
+        if (hasNewLast) _loadReactions();
       },
       onError: (e) {
         if (!mounted) return;
@@ -1070,7 +1070,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   Future<void> _refreshOtherReadAt() async {
     if (widget.isGroup) return; // grupta tek bir karşı taraf yok
     final t = await _service.getOtherReadAt(widget.conversationId);
-    if (!mounted) return;
+    if (!mounted || t == _otherReadAt) return;
     setState(() => _otherReadAt = t);
   }
 
