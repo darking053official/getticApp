@@ -39,14 +39,7 @@ jobs:
           $cacheDir = Join-Path $flutterRoot "bin\cache"
           Remove-Item -Path "$cacheDir\flutter_tools.stamp" -ErrorAction SilentlyContinue
           Remove-Item -Path "$cacheDir\flutter_tools.snapshot" -ErrorAction SilentlyContinue
-      - name: Disable flutter_secure_storage for Windows
-        run: |
-          if (Test-Path "pubspec.yaml") {
-            $content = Get-Content pubspec.yaml -Raw
-            $content = $content -replace "flutter_secure_storage: \^9\.0\.0", "# flutter_secure_storage: ^9.0.0"
-            Set-Content pubspec.yaml -Value $content -NoNewline
-          }
-          flutter pub get
+      - run: flutter pub get
       - run: flutter build windows --release
       - name: Sign Windows binaries (optional)
         env:
