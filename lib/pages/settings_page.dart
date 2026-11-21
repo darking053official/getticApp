@@ -740,7 +740,19 @@ class _SettingsPageState extends State<SettingsPage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: _back,
         ),
-        title: const Text('Ayarlar'),
+        centerTitle: true,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: c.background,
+        title: Text(
+          'Ayarlar',
+          style: TextStyle(
+            color: c.textPrimary,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.3,
+          ),
+        ),
       ),
       body: Stack(
         children: [
@@ -1099,17 +1111,44 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _section(String text, AppColors c, {Color? color}) {
+    final accent = color ?? c.primary;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 8),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          color: color ?? c.textSecondary,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1.2,
-        ),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 14,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text.toUpperCase(),
+            style: TextStyle(
+              color: c.textSecondary,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.1,
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  /// Ayar satırlarının ikonu: renkli, yuvarlatılmış kutu.
+  Widget _iconBox(IconData icon, Color color) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(icon, color: color, size: 20),
     );
   }
 
@@ -1119,8 +1158,15 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Container(
         decoration: BoxDecoration(
           color: c.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: c.border),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: c.border.withOpacity(0.6)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(children: children),
@@ -1247,13 +1293,14 @@ class _SettingsPageState extends State<SettingsPage> {
   }) {
     final enabled = onTap != null;
     return ListTile(
-      leading: Icon(icon, color: iconColor ?? c.textSecondary, size: 22),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: _iconBox(icon, iconColor ?? c.primary),
       title: Text(
         title,
         style: TextStyle(
           color: titleColor ?? (enabled ? c.textPrimary : c.textHint),
           fontSize: 15,
-          fontWeight: FontWeight.w500,
+          fontWeight: FontWeight.w600,
         ),
       ),
       subtitle: subtitle != null
@@ -1263,7 +1310,7 @@ class _SettingsPageState extends State<SettingsPage> {
               overflow: TextOverflow.ellipsis)
           : null,
       trailing: (enabled && trailing)
-          ? Icon(Icons.chevron_right, color: c.textSecondary, size: 20)
+          ? Icon(Icons.chevron_right_rounded, color: c.textHint, size: 22)
           : null,
       onTap: onTap,
     );
@@ -1278,10 +1325,11 @@ class _SettingsPageState extends State<SettingsPage> {
     required ValueChanged<bool> onChanged,
   }) {
     return SwitchListTile(
-      secondary: Icon(icon, color: c.textSecondary, size: 22),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      secondary: _iconBox(icon, c.primary),
       title: Text(title,
           style: TextStyle(
-              color: c.textPrimary, fontSize: 15, fontWeight: FontWeight.w500)),
+              color: c.textPrimary, fontSize: 15, fontWeight: FontWeight.w600)),
       subtitle: subtitle != null
           ? Text(subtitle, style: TextStyle(color: c.textSecondary, fontSize: 12))
           : null,
@@ -1291,7 +1339,8 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _divider(AppColors c) => Divider(color: c.border, height: 1, indent: 56);
+  Widget _divider(AppColors c) =>
+      Divider(color: c.border.withOpacity(0.6), height: 1, indent: 68, endIndent: 16);
 
   Widget _footer(AppColors c) {
     return Center(
