@@ -18,10 +18,13 @@
 
 import 'dart:convert';
 
+import 'dart:async';
+
 import 'package:cryptography/cryptography.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/message.dart';
+import 'e2ee_backup.dart';
 import 'e2ee_device.dart';
 
 /// Bu cihaz henüz onaylanmadıysa mesaj gönderilemez.
@@ -246,6 +249,7 @@ class E2eeChat {
       rethrow;
     }
     _keyCache['$convId|$kv'] = keyBytes;
+    unawaited(E2eeBackup.instance.refreshIfEnabled());
     return _KeyRef(kv, keyBytes);
   }
 
@@ -329,6 +333,61 @@ class E2eeChat {
             ignoreDuplicates: true,
           );
     }
+  }
+
+  /// Bu cihazın bildiği tüm sohbet anahtarlarını düz liste olarak verir (yedek için).
+  Future<List<Map<String, dynamic>>> exportKeyEntries() async {
+    final me = await E2eeDevice.instance.ensureIdentity();
+    final rows = await _sb
+        .from('e2ee_conversation_keys')
+        .select('conversation_id, key_version')
+        .eq('device_id', me.deviceId);
+    final out = <Map<String, dynamic>>[];
+    for (final r in rows as List) {
+      final convId = r['conversation_id'].toString();
+      final kv = (r['key_version'] as num).toInt();
+      final key = await _loadKey(convId, kv, me);
+      if (key != null) {
+        out.add({'c': convId, 'k': kv, 'key': base64Encode(key)});
+      }
+    }
+    return out;
+  }
+
+  /// Yedekten gelen anahtarları bu cihaza kendi anahtarıyla sarıp kaydeder.
+  /// Dönüş: kaydedilen anahtar sayısı.
+  Future<int> importKeyEntries(List<Map<String, dynamic>> entries) async {
+    final me = await E2eeDevice.instance.ensureIdentity();
+    final selfPub = SimplePublicKey(
+      base64Decode(me.x25519PubB64),
+      type: KeyPairType.x25519,
+    );
+
+    final rows = <Map<String, dynamic>>[];
+    for (final e in entries) {
+      final convId = e['c'] as String;
+      final kv = (e['k'] as num).toInt();
+      final key = base64Decode(e['key'] as String);
+      final wrapped =
+          await _wrap(key, me.x25519, convId, kv, me.deviceId, selfPub);
+      rows.add({
+        'conversation_id': convId,
+        'key_version': kv,
+        'device_id': me.deviceId,
+        'wrapped_key': wrapped,
+        'sender_device_id': me.deviceId,
+      });
+      _keyCache['$convId|$kv'] = key;
+    }
+
+    if (rows.isNotEmpty) {
+      await _sb.from('e2ee_conversation_keys').upsert(
+            rows,
+            onConflict: 'conversation_id,key_version,device_id',
+            ignoreDuplicates: true,
+          );
+    }
+    return rows.length;
   }
 
   /// Zarfı çözer. Başarısızsa (anahtar yok, imza hatalı, bozuk veri) null döner.
