@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import '../core/theme.dart';
 import '../services/e2ee_chat.dart';
 import '../services/e2ee_device.dart';
+import '../services/e2ee_backup.dart';
 import '../services/e2ee_link.dart';
 
 class DeviceLinkPage extends StatefulWidget {
@@ -98,6 +99,14 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
     }
   }
 
+  Future<void> _restoreFromBackup() async {
+    final count = await showBackupRestoreDialog(context);
+    if (count == null || !mounted) return;
+    _snack('$count anahtar geri yüklendi');
+    setState(() => _loading = true);
+    await _init();
+  }
+
   void _snack(String msg, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -174,6 +183,12 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
               },
         icon: const Icon(Icons.copy, size: 18),
         label: const Text('Metni kopyala'),
+      ),
+      const SizedBox(height: 16),
+      OutlinedButton.icon(
+        onPressed: _busy ? null : _restoreFromBackup,
+        icon: const Icon(Icons.restore, size: 18),
+        label: const Text('Yedekten geri yükle'),
       ),
       const SizedBox(height: 16),
       const Row(
