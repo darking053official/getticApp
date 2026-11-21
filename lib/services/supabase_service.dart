@@ -148,85 +148,32 @@ class SupabaseService {
   // ==========================================
   // SOHBETLER
   // ==========================================
+  /// Sohbet listesi: tek RPC çağrısı (chat_list_summary). Son mesajlar şifreliyse çözülür.
   Future<List<Map<String, dynamic>>> getMyConversationsWithUnread() async {
     final me = currentUser?.id;
     if (me == null) return [];
-
     try {
-      final members = await _client
-          .from(AppConstants.tableConversationMembers)
-          .select('conversation_id')
-          .eq('user_id', me);
+      final data = await _client.rpc('chat_list_summary');
+      final list = (data as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
 
-      final convIds = members.map((e) => e['conversation_id']).toList();
-      if (convIds.isEmpty) return [];
-
-      final List<Map<String, dynamic>> result = [];
-
-      for (var convId in convIds) {
-        final otherMember = await _client
-            .from(AppConstants.tableConversationMembers)
-            .select('user_id, profiles(*)')
-            .eq('conversation_id', convId)
-            .neq('user_id', me)
-            .limit(1)
-            .maybeSingle();
-
-        final lastMsg = await _client
-            .from(AppConstants.tableMessages)
-            .select('*')
-            .eq('conversation_id', convId)
-            .order('created_at', ascending: false)
-            .limit(1)
-            .maybeSingle();
-
-        final convData = await _client
-            .from(AppConstants.tableConversations)
-            .select('type, name, created_by, group_avatar_url')
-            .eq('id', convId)
-            .maybeSingle();
-
-        // Okunmamış sayısı: son okuma zamanımdan sonra karşı taraftan gelen mesajlar
-        final myRow = await _client
-            .from(AppConstants.tableConversationMembers)
-            .select('last_read_at')
-            .eq('conversation_id', convId)
-            .eq('user_id', me)
-            .maybeSingle();
-        final lastRead = myRow?['last_read_at'];
-        var unreadQuery = _client
-            .from(AppConstants.tableMessages)
-            .select('id')
-            .eq('conversation_id', convId)
-            .neq('sender_id', me);
-        if (lastRead != null) {
-          unreadQuery = unreadQuery.gt('created_at', lastRead);
+      await Future.wait(list.map((row) async {
+        final last = row['last_message'];
+        if (last is Map && last['enc'] != null) {
+          row['last_message'] = await E2eeChat.instance
+              .decryptedRow(Map<String, dynamic>.from(last));
         }
-        final unread = (await unreadQuery).length;
+      }));
 
-        result.add({
-          'conversation_id': convId,
-          'other_user': otherMember?['profiles'],
-          'last_message': lastMsg == null
-              ? null
-              : await E2eeChat.instance.decryptedRow(Map<String, dynamic>.from(lastMsg)),
-          'unread_count': unread,
-          'is_group': convData?['type'] == 'group',
-          'group_name': convData?['name'],
-          'created_by': convData?['created_by'],
-          'group_avatar_url': convData?['group_avatar_url'],
-        });
-      }
-
-      result.sort((a, b) {
+      list.sort((a, b) {
         final aDate = a['last_message']?['created_at'] ?? '2000-01-01';
         final bDate = b['last_message']?['created_at'] ?? '2000-01-01';
         return bDate.toString().compareTo(aDate.toString());
       });
-
-      return result;
+      return list;
     } catch (e) {
-      print('Sohbet çekme hatası: $e');
+      print('Sohbet listesi hatası: $e');
       return [];
     }
   }
