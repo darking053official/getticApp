@@ -771,6 +771,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 _section('Hesap', c),
                 _card(c, [
+                  _tile(c, Icons.circle_outlined, 'Durumum',
+                      subtitle: _profile?.modeLabel ?? 'Aktif',
+                      onTap: _pickMode),
+                  _divider(c),
                   _tile(c, Icons.alternate_email, 'E-posta adresi',
                       subtitle: _service.currentUser?.email ?? '',
                       onTap: _changeEmail),
@@ -1172,6 +1176,66 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(children: children),
       ),
     );
+  }
+
+  /// Kullanıcının durum modunu seçer: Aktif, Boşta, Rahatsız etmeyin.
+  Future<void> _pickMode() async {
+    final current = _profile?.mode ?? 'active';
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: context.appColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            for (final opt in const [
+              ['active', 'Aktif', 'Herkes size mesaj gönderebilir', Colors.green],
+              ['idle', 'Boşta', 'Uzakta olduğunuzu gösterir', Colors.amber],
+              ['dnd', 'Rahatsız etmeyin', 'Bu moddayken size bildirim gelmez', Colors.redAccent],
+            ])
+              ListTile(
+                leading: Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: opt[3] as Color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                title: Text(opt[1] as String,
+                    style: TextStyle(
+                        color: ctx.appColors.textPrimary,
+                        fontWeight: FontWeight.w600)),
+                subtitle: Text(opt[2] as String,
+                    style: TextStyle(color: ctx.appColors.textSecondary, fontSize: 12)),
+                trailing: current == opt[0]
+                    ? Icon(Icons.check, color: ctx.appColors.primary)
+                    : null,
+                onTap: () => Navigator.pop(ctx, opt[0] as String),
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || choice == current) return;
+    try {
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid == null) return;
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'mode': choice})
+          .eq('id', uid);
+      if (!mounted) return;
+      setState(() => _profile = _profile?.copyWith(mode: choice));
+      _snack('Durum güncellendi');
+    } catch (e) {
+      _snack('Durum kaydedilemedi: $e');
+    }
   }
 
   Future<void> _toggleAppLock() async {
