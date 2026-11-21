@@ -351,7 +351,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     _outboxTimer = Timer.periodic(const Duration(seconds: 15), (_) => _flushOutbox());
     if (widget.isGroup) _loadGroupMembers();
     _readPoll = Timer.periodic(
-        const Duration(seconds: 15), (_) => _refreshOtherReadAt());
+        const Duration(seconds: 4), (_) => _refreshOtherReadAt());
     WidgetsBinding.instance.addPostFrameCallback((_) => _markRead());
     _setupScrollListener();
     WidgetsBinding.instance.addObserver(this);
