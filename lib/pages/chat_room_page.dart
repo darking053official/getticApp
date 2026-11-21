@@ -1239,12 +1239,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           _controller.text = text;
           _controller.selection = TextSelection.collapsed(offset: text.length);
           setState(() => _replyTo = reply);
-          _showSnack(
-            e is E2eePendingException
-                ? 'Bu cihaz henüz onaylanmadı. Mevcut bir cihazdan onaylayın.'
-                : 'Mesaj gönderilemedi: $e',
-            isError: true,
-          );
+          _showSnack('Mesaj gönderilemedi: $e', isError: true);
         }
       }
     } finally {
