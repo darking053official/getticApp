@@ -49,6 +49,9 @@ jobs:
           if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw "ATL kurulamadı: $LASTEXITCODE" }
           $atl = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Recurse -Filter atlstr.h -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $atl) { throw "atlstr.h bulunamadı" }
+          $atlDir = $atl.DirectoryName
+          Write-Host "atlstr.h konumu: $atlDir"
+          "INCLUDE=$atlDir;$env:INCLUDE" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - run: flutter pub get
       - run: flutter build windows --release
       - name: Sign Windows binaries (optional)
