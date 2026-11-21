@@ -14,67 +14,104 @@ jobs:
   build-windows:
     name: Build Windows EXE
     runs-on: windows-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.2'
           channel: 'stable'
           cache: true
+
       - name: Setup Windows
+        shell: pwsh
         run: |
           flutter config --enable-windows-desktop
           flutter create . --project-name gettic --org com.gettic --platforms=windows
           Remove-Item -Path test/widget_test.dart -ErrorAction SilentlyContinue
+
           $flutterRoot = (Get-Command flutter).Source | Split-Path | Split-Path
-          $files = @("packages\flutter_tools\lib\src\windows\build_windows.dart", "packages\flutter_tools\lib\src\windows\visual_studio.dart")
+          $files = @(
+            "packages\flutter_tools\lib\src\windows\build_windows.dart",
+            "packages\flutter_tools\lib\src\windows\visual_studio.dart"
+          )
           foreach ($f in $files) {
             $p = Join-Path $flutterRoot $f
             if (Test-Path $p) {
               (Get-Content $p -Raw) -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022' | Set-Content $p -NoNewline
             }
           }
+
           $cacheDir = Join-Path $flutterRoot "bin\cache"
           Remove-Item -Path "$cacheDir\flutter_tools.stamp" -ErrorAction SilentlyContinue
           Remove-Item -Path "$cacheDir\flutter_tools.snapshot" -ErrorAction SilentlyContinue
-      - name: Install Visual Studio ATL (flutter_secure_storage_windows için)
+
+      - name: Install Visual Studio ATL
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -property installationPath
+          if (-not $vsPath) { throw "Visual Studio kurulum yolu bulunamadı" }
+
           $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-          & $installer modify --installPath "$vsPath" --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart
-          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw "ATL kurulamadı: $LASTEXITCODE" }
+          & $installer modify --installPath "$vsPath" --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart --wait
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+            throw "ATL kurulamadı. Çıkış kodu: $LASTEXITCODE"
+          }
+
           $atl = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Recurse -Filter atlstr.h -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $atl) { throw "atlstr.h bulunamadı" }
+
           $atlDir = $atl.DirectoryName
           Write-Host "atlstr.h konumu: $atlDir"
           "INCLUDE=$atlDir;$env:INCLUDE" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - run: flutter pub get
-      - run: flutter build windows --release
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
       - name: Sign Windows binaries (optional)
+        shell: pwsh
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          if ([string]::IsNullOrEmpty($env:WINDOWS_CERT_BASE64)) {
-            Write-Host "::warning::WINDOWS_CERT_BASE64 tanımlı değil."
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_BASE64)) {
+            Write-Host "::warning::WINDOWS_CERT_BASE64 tanımlı değil, imzalama atlandı."
             exit 0
           }
+
           $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
-          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $signtool) { throw "signtool.exe bulunamadı" }
-          $targets = Get-ChildItem -Path "build\windows\x64\runner\Release" -Recurse -Include *.exe,*.dll
-          foreach ($t in $targets) {
-            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 $t.FullName
-            if ($LASTEXITCODE -ne 0) { throw "İmzalama başarısız: $($t.Name)" }
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+            $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+            if (-not $signtool) { throw "signtool.exe bulunamadı" }
+
+            $releaseDir = "build\windows\x64\runner\Release"
+            if (-not (Test-Path $releaseDir)) { throw "Release klasörü bulunamadı: $releaseDir" }
+
+            $targets = Get-ChildItem -Path $releaseDir -Recurse -Include *.exe,*.dll
+            foreach ($t in $targets) {
+              & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 $t.FullName
+              if ($LASTEXITCODE -ne 0) { throw "İmzalama başarısız: $($t.Name)" }
+            }
+          } finally {
+            Remove-Item -Path $pfx -Force -ErrorAction SilentlyContinue
           }
-          Remove-Item $pfx -Force
-      - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath gettic-windows.zip
-      - uses: actions/upload-artifact@v4
+
+      - name: Package release artifact
+        shell: pwsh
+        run: |
+          $releaseDir = "build\windows\x64\runner\Release"
+          if (-not (Test-Path $releaseDir)) { throw "Paketlenecek Release klasörü bulunamadı: $releaseDir" }
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath "gettic-windows.zip" -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
         with:
           name: gettic-windows
           path: gettic-windows.zip
