@@ -398,9 +398,15 @@ class E2eeChat {
       final sd = enc['sd'] as String;
 
       final sender = await _devicePub(sd);
-      if (sender == null) return null;
+      if (sender == null) {
+        print('E2EE: gönderen cihaz açık anahtarı bulunamadı ($sd)');
+        return null;
+      }
       final key = await _loadKey(convId, kv, me);
-      if (key == null) return null;
+      if (key == null) {
+        print('E2EE: bu cihaz için sohbet anahtarı yok (kv=$kv, conv=$convId)');
+        return null;
+      }
 
       final nonce = base64Decode(enc['nonce'] as String);
       final ct = base64Decode(enc['ct'] as String);
@@ -414,7 +420,10 @@ class E2eeChat {
           publicKey: sender.ed,
         ),
       );
-      if (!sigOk) return null;
+      if (!sigOk) {
+        print('E2EE: imza doğrulanamadı (kv=$kv)');
+        return null;
+      }
 
       final clear = await _aead.decrypt(
         SecretBox(ct, nonce: nonce, mac: Mac(mac)),
@@ -422,7 +431,8 @@ class E2eeChat {
         aad: aad,
       );
       return utf8.decode(clear);
-    } catch (_) {
+    } catch (e) {
+      print('E2EE: çözme hatası: $e');
       return null;
     }
   }
