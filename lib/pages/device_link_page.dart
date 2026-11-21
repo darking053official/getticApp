@@ -107,6 +107,59 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
     await _init();
   }
 
+  /// Yerel anahtarların sunucudaki kayıtla eşleşip eşleşmediğini kontrol eder.
+  Future<void> _checkKeys() async {
+    setState(() => _busy = true);
+    try {
+      final me = await E2eeDevice.instance.ensureIdentity();
+      final row = await Supabase.instance.client
+          .from('devices')
+          .select('identity_pub_x25519, identity_pub_ed25519, approved_at, revoked_at')
+          .eq('id', me.deviceId)
+          .maybeSingle();
+      if (row == null) {
+        _snack('Sunucuda bu cihaz kaydı yok', isError: true);
+        return;
+      }
+      final xOk = row['identity_pub_x25519'] == me.x25519PubB64;
+      final edOk = row['identity_pub_ed25519'] == me.ed25519PubB64;
+      final approved = row['approved_at'] != null;
+      final msg = (xOk && edOk)
+          ? 'Anahtarlar eşleşiyor. ${approved ? "Cihaz onaylı." : "Cihaz onaylı değil."}'
+          : 'UYUŞMA: Yerel anahtarlar sunucuyla eşleşmiyor. Cihazı yeniden bağlayın.';
+      _snack(msg, isError: !(xOk && edOk));
+    } catch (e) {
+      _snack('Kontrol edilemedi: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _shareHistoryAll() async {
+    setState(() => _busy = true);
+    try {
+      final me = await E2eeDevice.instance.ensureIdentity();
+      final devices = await Supabase.instance.client
+          .from('devices')
+          .select('id, identity_pub_x25519')
+          .neq('id', me.deviceId)
+          .isFilter('revoked_at', null)
+          .not('approved_at', 'is', null);
+      final list = List<Map<String, dynamic>>.from(devices as List);
+      for (final d in list) {
+        await E2eeChat.instance.shareHistoryWith(
+          targetDeviceId: d['id'].toString(),
+          targetX25519PubB64: d['identity_pub_x25519'] as String,
+        );
+      }
+      _snack('Geçmiş ${list.length} cihaza paylaşıldı');
+    } catch (e) {
+      _snack('Paylaşılamadı: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _snack(String msg, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -251,6 +304,31 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
         const SizedBox(height: 12),
         Text(_error!, style: const TextStyle(color: Colors.redAccent)),
       ],
+      const SizedBox(height: 28),
+      const Divider(color: AppTheme.inputBorder),
+      const SizedBox(height: 12),
+      const Text(
+        'Geçmişi diğer cihazlarla paylaş',
+        style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+      const SizedBox(height: 6),
+      const Text(
+        'Bu cihazın bildiği eski sohbet anahtarlarını bağlı diğer cihazlara gönderir. '
+        'Eski mesajların o cihazlarda açılması için bu düğmeyi ilk (eski) cihazdan kullanın.',
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        onPressed: _busy ? null : _checkKeys,
+        icon: const Icon(Icons.vpn_key_outlined, size: 18),
+        label: const Text('Anahtarları kontrol et'),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        onPressed: _busy ? null : _shareHistoryAll,
+        icon: const Icon(Icons.share_outlined, size: 18),
+        label: const Text('Geçmişi paylaş'),
+      ),
     ];
   }
 }
