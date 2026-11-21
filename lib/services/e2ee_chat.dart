@@ -122,8 +122,10 @@ class E2eeChat {
 
   // ---------- Sohbet anahtarı (sürümlü) ----------
 
-  /// Güncel alıcı cihazlar (iptal edilmemiş, sohbet üyelerinin cihazları).
-  Future<List<Map<String, dynamic>>> _recipientDevices(String convId) async {
+  /// Güncel alıcı cihazlar: onaylı cihazlar + bu cihazın kendisi (onaysız olsa bile
+  /// kendi gönderdiği mesajları sonra çözebilmesi için).
+  Future<List<Map<String, dynamic>>> _recipientDevices(
+      String convId, String myDeviceId) async {
     final members = await _sb
         .from('conversation_members')
         .select('user_id')
@@ -133,11 +135,13 @@ class E2eeChat {
     if (userIds.isEmpty) return [];
     final devices = await _sb
         .from('devices')
-        .select('id, identity_pub_x25519')
+        .select('id, identity_pub_x25519, approved_at')
         .inFilter('user_id', userIds)
-        .isFilter('revoked_at', null)
-        .not('approved_at', 'is', null);
-    return List<Map<String, dynamic>>.from(devices as List);
+        .isFilter('revoked_at', null);
+    return (devices as List)
+        .where((d) => d['approved_at'] != null || d['id'].toString() == myDeviceId)
+        .map((d) => Map<String, dynamic>.from(d as Map))
+        .toList();
   }
 
   Future<int?> _latestKeyVersion(String convId) async {
@@ -182,7 +186,7 @@ class E2eeChat {
 
   /// Güncel anahtarı verir. Üyelik değiştiyse yeni sürüm üretir.
   Future<_KeyRef?> _ensureCurrentKey(String convId, DeviceIdentity me) async {
-    final devices = await _recipientDevices(convId);
+    final devices = await _recipientDevices(convId, me.deviceId);
     if (devices.isEmpty) return null; // E2EE cihazı olan alıcı yok
 
     final wanted = devices.map((d) => d['id'].toString()).toSet();
