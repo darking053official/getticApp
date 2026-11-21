@@ -29,6 +29,7 @@ import 'profile_preview.dart';
 import 'group_info_page.dart';
 import '../services/chat_outbox.dart';
 import '../services/e2ee_media.dart';
+import '../services/e2ee_chat.dart';
 
 // ============================================================
 // AYARLAR
@@ -1221,11 +1222,30 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       await _service.sendMessage(widget.conversationId, text,
           replyToId: reply?.id);
     } catch (e) {
-      // Çevrimdışıysa mesajı kuyruğa al, bağlantı gelince otomatik gönderilir
-      await ChatOutbox.instance.add(widget.conversationId, text, reply?.id);
-      if (mounted) {
-        setState(() => _replyTo = null);
-        _showSnack('Bağlantı yok. Mesaj bağlantı gelince gönderilecek');
+      final isNetwork = e is SocketException ||
+          e is TimeoutException ||
+          e.toString().contains('SocketException') ||
+          e.toString().contains('ClientException');
+      if (isNetwork) {
+        // Gerçekten çevrimdışıysa mesajı kuyruğa al, bağlantı gelince gönderilir
+        await ChatOutbox.instance.add(widget.conversationId, text, reply?.id);
+        if (mounted) {
+          setState(() => _replyTo = null);
+          _showSnack('Bağlantı yok. Mesaj bağlantı gelince gönderilecek');
+        }
+      } else {
+        // Ağ dışı hata (ör. cihaz onaylı değil): mesajı kutuya geri ver
+        if (mounted) {
+          _controller.text = text;
+          _controller.selection = TextSelection.collapsed(offset: text.length);
+          setState(() => _replyTo = reply);
+          _showSnack(
+            e is E2eePendingException
+                ? 'Bu cihaz henüz onaylanmadı. Mevcut bir cihazdan onaylayın.'
+                : 'Mesaj gönderilemedi: $e',
+            isError: true,
+          );
+        }
       }
     } finally {
       if (mounted) setState(() => _isSending = false);
