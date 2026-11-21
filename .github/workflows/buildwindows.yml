@@ -64,13 +64,60 @@ jobs:
 
           $atlDir = $atl.DirectoryName
           Write-Host "atlstr.h konumu: $atlDir"
+          "ATL_INCLUDE_DIR=$atlDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "INCLUDE=$atlDir;$env:INCLUDE" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Build Windows release
-        run: flutter build windows --release
+      - name: Build Windows release (with ATL vcxproj patch)
+        shell: pwsh
+        run: |
+          $atlDir = $env:ATL_INCLUDE_DIR
+          if ([string]::IsNullOrWhiteSpace($atlDir) -or -not (Test-Path "$atlDir\atlstr.h")) {
+            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            $vsPath = & $vswhere -latest -products * -property installationPath
+            $atl = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Recurse -Filter atlstr.h -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $atl) { throw "atlstr.h bulunamadı" }
+            $atlDir = $atl.DirectoryName
+          }
+          Write-Host "Kullanılan ATL dizini: $atlDir"
+
+          flutter build windows --release
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "İlk derleme durdu, .vcxproj dosyalarına ATL include yolu ekleniyor..."
+            $vcxprojFiles = Get-ChildItem -Path "build\windows" -Recurse -Filter "*.vcxproj" -ErrorAction SilentlyContinue
+            if (-not $vcxprojFiles) {
+              throw "Yamalanacak .vcxproj dosyası bulunamadı."
+            }
+
+            foreach ($vcxproj in $vcxprojFiles) {
+              [xml]$xml = Get-Content -Path $vcxproj.FullName
+              $ns = New-Object System.Xml.XmlNamespaceManager($xml.NameTable)
+              $ns.AddNamespace("msb", "http://schemas.microsoft.com/developer/msbuild/2003")
+
+              $itemDefs = $xml.SelectNodes("//msb:ItemDefinitionGroup/msb:ClCompile", $ns)
+              foreach ($cl in $itemDefs) {
+                $incNode = $cl.SelectSingleNode("msb:AdditionalIncludeDirectories", $ns)
+                if ($null -eq $incNode) {
+                  $incNode = $xml.CreateElement("AdditionalIncludeDirectories", "http://schemas.microsoft.com/developer/msbuild/2003")
+                  $incNode.InnerText = "$atlDir;%(AdditionalIncludeDirectories)"
+                  [void]$cl.AppendChild($incNode)
+                } elseif ($incNode.InnerText -notlike "*$atlDir*") {
+                  $incNode.InnerText = "$atlDir;$($incNode.InnerText)"
+                }
+              }
+              $xml.Save($vcxproj.FullName)
+              Write-Host "Güncellendi: $($vcxproj.Name)"
+            }
+
+            Write-Host "ATL yolu eklendi, derleme yeniden başlatılıyor..."
+            flutter build windows --release
+            if ($LASTEXITCODE -ne 0) {
+              throw "İkinci derleme de başarısız oldu."
+            }
+          }
 
       - name: Sign Windows binaries (optional)
         shell: pwsh
