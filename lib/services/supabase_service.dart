@@ -331,17 +331,16 @@ class SupabaseService {
     }
   }
 
-  /// Sohbeti okundu olarak işaretler (kendi last_read_at değerim).
+  /// Sohbeti okundu olarak işaretler. Zaman sunucuda yazılır (cihaz saatinden bağımsız).
   Future<void> markConversationRead(String conversationId) async {
     final me = currentUser?.id;
     if (me == null) return;
     try {
-      await _client
-          .from(AppConstants.tableConversationMembers)
-          .update({'last_read_at': DateTime.now().toUtc().toIso8601String()})
-          .eq('conversation_id', conversationId)
-          .eq('user_id', me);
-    } catch (_) {}
+      await _client.rpc('mark_conversation_read',
+          params: {'p_conv': conversationId});
+    } catch (e) {
+      print('Okundu işaretlenemedi: $e');
+    }
   }
 
   /// Karşı tarafın son okuma zamanı. Mesajın görüldü durumu buna göre hesaplanır.
