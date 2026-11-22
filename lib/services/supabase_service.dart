@@ -376,17 +376,16 @@ class SupabaseService {
         .stream(primaryKey: ['id'])
         .eq('conversation_id', conversationId)
         .order('created_at', ascending: true)
-        .asyncMap((data) async {
-          final out = <Message>[];
-          for (final j in data) {
+        .asyncMap((data) {
+          final rows = data.where((j) {
             final e = j['expires_at'];
-            if (e != null) {
-              final t = DateTime.tryParse(e.toString());
-              if (t != null && !t.isAfter(DateTime.now().toUtc())) continue;
-            }
-            out.add(await E2eeChat.instance.toMessage(Map<String, dynamic>.from(j)));
-          }
-          return out;
+            if (e == null) return true;
+            final t = DateTime.tryParse(e.toString());
+            return t == null || t.isAfter(DateTime.now().toUtc());
+          }).toList();
+          // Şifre çözmeleri paralel çalıştır (sıra korunur)
+          return Future.wait(rows.map((j) =>
+              E2eeChat.instance.toMessage(Map<String, dynamic>.from(j))));
         });
   }
 
