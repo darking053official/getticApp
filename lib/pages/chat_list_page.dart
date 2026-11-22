@@ -24,6 +24,7 @@ import '../services/supabase_service.dart';
 import 'chat_room_page.dart';
 import 'new_group_page.dart';
 import '../services/chat_lock_service.dart';
+import '../services/chat_cache.dart';
 import '../services/desktop_notifier.dart';
 import '../services/notification_privacy.dart';
 import 'settings_page.dart';
@@ -109,6 +110,15 @@ class _ChatListPageState extends State<ChatListPage>
       _all = cache.conversations!;
       _loading = false;
       if (mounted) setState(_rebuildView);
+    }
+
+    if (_all.isEmpty && _uid != null) {
+      final persisted = await LocalCache.loadChatList(_uid!);
+      if (persisted.isNotEmpty && mounted) {
+        _all = persisted;
+        _loading = false;
+        setState(_rebuildView);
+      }
     }
 
     await _loadPrefs();
@@ -366,6 +376,7 @@ class _ChatListPageState extends State<ChatListPage>
       _pruneMissingIds(data);
       ChatListCache.instance.conversations = data;
       ChatListCache.instance.userId = _uid;
+      if (_uid != null) LocalCache.saveChatList(_uid!, data);
 
       setState(() {
         _all = data;
