@@ -9,6 +9,8 @@ class Profile {
   final String? avatarUrl;
   final String status; // "online" veya "offline"
   final String mode; // "active" | "idle" | "dnd"
+  final String role; // "user" | "admin"
+  final bool banned;
   final bool showOnlineStatus;
   final bool showLastSeen;
   final DateTime? lastSeenAt;
@@ -21,6 +23,8 @@ class Profile {
     this.avatarUrl,
     this.status = 'offline',
     this.mode = 'active',
+    this.role = 'user',
+    this.banned = false,
     this.showOnlineStatus = true,
     this.showLastSeen = true,
     this.lastSeenAt,
@@ -39,6 +43,8 @@ class Profile {
       mode: (json['mode'] as String?)?.isNotEmpty == true
           ? json['mode'] as String
           : 'active',
+      role: (json['role'] as String?) ?? 'user',
+      banned: json['banned'] == true,
       showOnlineStatus:
           _parseBool(json['show_online_status'], defaultValue: true),
       showLastSeen: _parseBool(json['show_last_seen'], defaultValue: true),
