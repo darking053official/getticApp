@@ -60,7 +60,7 @@ class E2eeChat {
   final Map<String, DateTime> _missingKeys = {};
   static const Duration _missingTtl = Duration(seconds: 45);
   void _setKey(String cacheKey, List<int> key) {
-    _setKey(cacheKey, key);
+    _keyCache[cacheKey] = key;
     _missingKeys.remove(cacheKey);
   }
   static const Duration _currentTtl = Duration(seconds: 60);
