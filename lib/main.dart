@@ -29,7 +29,9 @@ import 'services/meet_service.dart';
 import 'services/chat_lock_service.dart';
 import 'services/app_lock.dart';
 import 'services/desktop_notifier.dart';
+import 'services/notification_privacy.dart';
 import 'services/meet_push_handler.dart';
+import 'services/ban_watcher.dart';
 import 'services/notification_service.dart';
 
 final authStateProvider = StreamProvider<AuthState>((ref) {
@@ -85,6 +87,7 @@ void main() async {
   if (currentUser != null) {
     OneSignal.login(currentUser.id);
     AppState().setCurrentUserId(currentUser.id);
+    unawaited(NotificationPrivacy.load());
   }
 
   WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
@@ -201,6 +204,7 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
 
     // Uygulama zaten oturumluysa gelen çağrı dinlemesini hemen başlat
     if (Supabase.instance.client.auth.currentUser != null) {
+      BanWatcher.start(Supabase.instance.client.auth.currentUser!.id);
       MeetService.instance.startListening();
     }
 
@@ -210,10 +214,13 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
       final userId = data.session?.user.id;
 
       if (event == AuthChangeEvent.signedIn && userId != null) {
+        unawaited(NotificationPrivacy.load());
         OneSignal.login(userId);
         AppState().setCurrentUserId(userId);
+        BanWatcher.start(userId);
         MeetService.instance.startListening();
       } else if (event == AuthChangeEvent.signedOut) {
+        BanWatcher.stop();
         OneSignal.logout();
         AppState().reset();
         MeetService.instance.stopListening();
