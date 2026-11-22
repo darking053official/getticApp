@@ -31,6 +31,23 @@ class Message {
     this.mediaSecret,
   });
 
+  /// Yerel önbellek için satır biçimi (fromJson ile geri okunabilir).
+  Map<String, dynamic> toCacheJson() => {
+        'id': id,
+        'conversation_id': conversationId,
+        'sender_id': senderId,
+        'content': content,
+        'type': type,
+        'media_url': mediaUrl,
+        'reply_to': replyToId,
+        'created_at': createdAt.toUtc().toIso8601String(),
+        'edited_at': editedAt?.toUtc().toIso8601String(),
+        'is_deleted': isDeleted,
+        'forwarded': forwarded,
+        'decrypt_failed': decryptFailed,
+        'media_secret': mediaSecret,
+      };
+
   factory Message.fromJson(Map<String, dynamic> json) {
     return Message(
       id: json['id']?.toString() ?? '',
