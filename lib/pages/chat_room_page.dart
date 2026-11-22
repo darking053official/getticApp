@@ -30,6 +30,7 @@ import 'group_info_page.dart';
 import '../services/chat_outbox.dart';
 import '../services/e2ee_media.dart';
 import '../services/e2ee_chat.dart';
+import '../services/chat_cache.dart';
 
 // ============================================================
 // AYARLAR
@@ -341,6 +342,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   void initState() {
     super.initState();
     AppState().setActiveConversation(widget.conversationId);
+    _loadCachedMessages();
     _subscribeToMessages();
     _subscribeToTyping();
     _subscribeToReads();
@@ -957,6 +959,17 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   // ==========================================
   // MESAJLAR
   // ==========================================
+  /// Açılışta önbellekteki son mesajları hemen göster (sunucu beklenmez).
+  Future<void> _loadCachedMessages() async {
+    final cached = await LocalCache.loadMessages(widget.conversationId);
+    if (!mounted || cached.isEmpty || _messages.isNotEmpty) return;
+    setState(() {
+      _messages = cached;
+      _isLoading = false;
+    });
+    _scrollToBottom(animated: false);
+  }
+
   void _subscribeToMessages() {
     _messagesSubscription =
         _service.streamMessages(widget.conversationId).listen(
@@ -986,6 +999,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           _scrollToBottom();
         }
 
+        LocalCache.saveMessages(widget.conversationId, msgs);
         _markIncomingAsRead(msgs, myId);
         if (hasNewLast) _loadReactions();
       },
