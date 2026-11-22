@@ -480,6 +480,9 @@ class _AuthPageState extends State<AuthPage> {
 
   String _translateAuthError(String msg) {
     final lower = msg.toLowerCase();
+    if (lower.contains('banned')) {
+      return 'Hesabınız politikalar gereği yasaklandı.';
+    }
     if (lower.contains('invalid login')) return 'E-posta veya şifre hatalı';
     if (lower.contains('email not confirmed')) {
       return 'Önce e-postanı doğrulaman gerekiyor';
