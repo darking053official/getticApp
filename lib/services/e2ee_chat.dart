@@ -54,6 +54,9 @@ class E2eeChat {
   final Map<String, List<int>> _keyCache = {}; // "conv|kv" -> anahtar
   final Map<String, _DevicePub> _deviceCache = {}; // deviceId -> açık anahtarlar
   final Map<String, Message> _messageCache = {}; // messageId -> çözülmüş mesaj
+  // Güncel anahtar önbelleği (gönderim hızı için). Üyelik değişince temizlenir.
+  final Map<String, _CachedRef> _currentRef = {};
+  static const Duration _currentTtl = Duration(seconds: 60);
 
   SupabaseClient get _sb => Supabase.instance.client;
 
@@ -184,8 +187,22 @@ class E2eeChat {
     return key;
   }
 
-  /// Güncel anahtarı verir. Üyelik değiştiyse yeni sürüm üretir.
+  /// Güncel anahtarı verir (60 sn önbellekli). Üyelik değiştiyse yeni sürüm üretir.
   Future<_KeyRef?> _ensureCurrentKey(String convId, DeviceIdentity me) async {
+    final cached = _currentRef[convId];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < _currentTtl) {
+      return cached.ref;
+    }
+    final ref = await _ensureCurrentKeyUncached(convId, me);
+    if (ref != null) {
+      _currentRef[convId] = _CachedRef(ref, DateTime.now());
+    }
+    return ref;
+  }
+
+  Future<_KeyRef?> _ensureCurrentKeyUncached(
+      String convId, DeviceIdentity me) async {
     final devices = await _recipientDevices(convId, me.deviceId);
     if (devices.isEmpty) return null; // E2EE cihazı olan alıcı yok
 
@@ -209,6 +226,7 @@ class E2eeChat {
 
   /// Üyelik değişikliğinden sonra çağrılır (yönetici ekleme/çıkarma yaptığında).
   Future<void> rotateIfNeeded(String convId) async {
+    _currentRef.remove(convId); // üyelik değişti: önbelleği at
     try {
       final me = await E2eeDevice.instance.ensureIdentity();
       await _ensureCurrentKey(convId, me);
@@ -491,4 +509,10 @@ class _KeyRef {
   final int kv;
   final List<int> key;
   _KeyRef(this.kv, this.key);
+}
+
+class _CachedRef {
+  final _KeyRef ref;
+  final DateTime at;
+  _CachedRef(this.ref, this.at);
 }
