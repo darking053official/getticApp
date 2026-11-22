@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/theme.dart';
+import 'password_reset_page.dart';
 import '../core/constants.dart';
 import '../core/utils.dart';
 import '../core/security.dart';
@@ -542,7 +543,15 @@ class _AuthPageState extends State<AuthPage> {
 
     try {
       await Supabase.instance.client.auth.resetPasswordForEmail(email);
-      _snack('Şifre sıfırlama bağlantısı e-postanıza gönderildi ✓');
+      _snack('Doğrulama kodu e-postanıza gönderildi ✓');
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PasswordResetPage(email: email),
+          ),
+        );
+      }
     } catch (e) {
       _snack('Hata: ${InputGuard.redact(e.toString())}', isError: true);
     }
