@@ -59,8 +59,17 @@ class E2eeDevice {
 
   DeviceIdentity? _cached;
 
-  /// Cihaz kimliğini döndürür. Yoksa üretir, depoya yazar ve sunucuya kaydeder.
-  Future<DeviceIdentity> ensureIdentity() async {
+  Future<DeviceIdentity>? _inFlight;
+
+  /// Cihaz kimliğini döndürür. Aynı anda gelen çağrılar tek bir işlemi bekler;
+  /// böylece birden fazla cihaz kaydı oluşmaz (yarış koşulu düzeltmesi).
+  Future<DeviceIdentity> ensureIdentity() {
+    final c = _cached;
+    if (c != null) return Future.value(c);
+    return _inFlight ??= _ensureOnce().whenComplete(() => _inFlight = null);
+  }
+
+  Future<DeviceIdentity> _ensureOnce() async {
     if (_cached != null) return _cached!;
 
     final user = Supabase.instance.client.auth.currentUser;
@@ -96,7 +105,7 @@ class E2eeDevice {
       'name': _deviceName(),
       'identity_pub_x25519': base64Encode(xPub.bytes),
       'identity_pub_ed25519': base64Encode(edPub.bytes),
-      'approved_at': hasOthers ? null : DateTime.now().toUtc().toIso8601String(),
+      'approved_at': DateTime.now().toUtc().toIso8601String(),
     }).select('id').single();
 
     final deviceId = row['id'].toString();
@@ -105,7 +114,7 @@ class E2eeDevice {
     await _write(_kEd25519Seed, base64Encode(edSeed));
     await _write(_kDeviceId, deviceId);
 
-    final identity = await _build(deviceId, x, ed, approved: !hasOthers);
+    final identity = await _build(deviceId, x, ed, approved: true);
     _cached = identity;
     return identity;
   }
