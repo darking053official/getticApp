@@ -56,6 +56,13 @@ class E2eeChat {
   final Map<String, Message> _messageCache = {}; // messageId -> çözülmüş mesaj
   // Güncel anahtar önbelleği (gönderim hızı için). Üyelik değişince temizlenir.
   final Map<String, _CachedRef> _currentRef = {};
+  // Bulunamayan anahtarlar (her mesaj için tekrar sorgu atmamak için kısa süre hatırlanır)
+  final Map<String, DateTime> _missingKeys = {};
+  static const Duration _missingTtl = Duration(seconds: 45);
+  void _setKey(String cacheKey, List<int> key) {
+    _setKey(cacheKey, key);
+    _missingKeys.remove(cacheKey);
+  }
   static const Duration _currentTtl = Duration(seconds: 60);
 
   SupabaseClient get _sb => Supabase.instance.client;
@@ -162,6 +169,10 @@ class E2eeChat {
     final cacheKey = '$convId|$kv';
     final cached = _keyCache[cacheKey];
     if (cached != null) return cached;
+    final missingAt = _missingKeys[cacheKey];
+    if (missingAt != null && DateTime.now().difference(missingAt) < _missingTtl) {
+      return null;
+    }
 
     final row = await _sb
         .from('e2ee_conversation_keys')
@@ -170,7 +181,10 @@ class E2eeChat {
         .eq('key_version', kv)
         .eq('device_id', me.deviceId)
         .maybeSingle();
-    if (row == null || row['sender_device_id'] == null) return null;
+    if (row == null || row['sender_device_id'] == null) {
+      _missingKeys[cacheKey] = DateTime.now();
+      return null;
+    }
 
     final sender = await _devicePub(row['sender_device_id'].toString());
     if (sender == null) return null;
@@ -183,7 +197,7 @@ class E2eeChat {
       me.deviceId,
       sender.x,
     );
-    _keyCache[cacheKey] = key;
+    _setKey(cacheKey, key);
     return key;
   }
 
@@ -270,7 +284,7 @@ class E2eeChat {
       if (existing != null) return _KeyRef(kv, existing);
       rethrow;
     }
-    _keyCache['$convId|$kv'] = keyBytes;
+    _setKey('$convId|$kv', keyBytes);
     unawaited(E2eeBackup.instance.refreshIfEnabled());
     return _KeyRef(kv, keyBytes);
   }
@@ -398,7 +412,7 @@ class E2eeChat {
         'wrapped_key': wrapped,
         'sender_device_id': me.deviceId,
       });
-      _keyCache['$convId|$kv'] = key;
+      _setKey('$convId|$kv', key);
     }
 
     if (rows.isNotEmpty) {
