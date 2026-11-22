@@ -28,7 +28,6 @@ import '../services/cloud_notebook.dart';
 import '../services/cloud_pass.dart';
 import '../services/cloud_vaults.dart';
 import '../services/app_lock.dart';
-import 'device_link_page.dart';
 import '../services/e2ee_backup.dart';
 import '../services/notification_privacy.dart';
 import '../services/web_crypto.dart';
@@ -827,12 +826,9 @@ class _SettingsPageState extends State<SettingsPage> {
                       subtitle: 'Yedek parolası belirleyin ya da yedeği güncelleyin',
                       onTap: () => showBackupSetupDialog(context)),
                   _divider(c),
-                  _tile(c, Icons.devices_outlined, 'Cihaz bağlama',
-                      subtitle: 'Yeni cihazı onaylayın veya bu cihazı bağlayın',
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const DeviceLinkPage()))),
+                  _tile(c, Icons.restore, 'Yedekten geri yükle',
+                      subtitle: 'Yedek parolanızla sohbet anahtarlarını bu cihaza alın',
+                      onTap: () => showBackupRestoreDialog(context)),
                   _divider(c),
                   _tile(c, Icons.lock_outline, 'Uygulama kilidi',
                       subtitle: AppLock.instance.enabled
