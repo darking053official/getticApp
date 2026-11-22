@@ -29,6 +29,7 @@ import '../services/cloud_pass.dart';
 import '../services/cloud_vaults.dart';
 import '../services/app_lock.dart';
 import '../services/e2ee_backup.dart';
+import 'admin_page.dart';
 import '../services/notification_privacy.dart';
 import '../services/web_crypto.dart';
 import '../services/supabase_service.dart';
@@ -826,6 +827,14 @@ class _SettingsPageState extends State<SettingsPage> {
                       subtitle: 'Yedek parolası belirleyin ya da yedeği güncelleyin',
                       onTap: () => showBackupSetupDialog(context)),
                   _divider(c),
+                  if (_profile?.role == 'admin') ...[
+                    _tile(c, Icons.admin_panel_settings_outlined, 'Yönetici paneli',
+                        subtitle: 'Kullanıcı ara, banla, ban kaldır',
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const AdminPage()))),
+                    _divider(c),
+                  ],
                   _tile(c, Icons.restore, 'Yedekten geri yükle',
                       subtitle: 'Yedek parolanızla sohbet anahtarlarını bu cihaza alın',
                       onTap: () => showBackupRestoreDialog(context)),
