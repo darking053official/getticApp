@@ -1,22 +1,32 @@
 // ============================================================
 // lib/services/captcha_gate.dart
 // (.txt olarak verildi. Projeye eklerken adını captcha_gate.dart yapın.)
-// Cloudflare Turnstile doğrulaması. Android ve iOS'ta WebView ile açılır.
-// Masaüstünde (Windows, macOS, Linux) WebView desteklenmediği için null döner.
-// Gerekli paket: webview_flutter
-// Cloudflare panelinde Turnstile widget'ının hostname listesine gettic.dpdns.org eklenmeli.
+// Cloudflare Turnstile doğrulaması.
+//  - Android / iOS: WebView penceresi (webview_flutter).
+//  - Windows / macOS / Linux: sistem tarayıcısı açılır, doğrulama sayfası
+//    (Supabase Edge Function: captcha-page) token'ı 127.0.0.1 üzerindeki
+//    geçici yerel sunucuya gönderir.
+// Gerekli paketler: webview_flutter, url_launcher
+// Cloudflare Turnstile widget'ının hostname listesine şunlar eklenmeli:
+//   gettic.dpdns.org
+//   ayucfychcemsvzlgsdqq.supabase.co
 // ============================================================
 
-import 'dart:io' show Platform;
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core/theme.dart';
 
 const String kTurnstileSiteKey = '0x4AAAAAAFS3vgW1pXHXHKOn';
+const String kCaptchaPageUrl =
+    'https://ayucfychcemsvzlgsdqq.supabase.co/functions/v1/captcha-page';
 
-const String _turnstileHtml = '''
+const String _mobileHtml = '''
 <!DOCTYPE html>
 <html>
 <head>
@@ -45,22 +55,66 @@ const String _turnstileHtml = '''
 class CaptchaGate {
   CaptchaGate._();
 
-  /// Bu platformda doğrulama penceresi açılabiliyor mu?
-  static bool get supported => Platform.isAndroid || Platform.isIOS;
+  static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
-  /// Doğrulamayı gösterir. Başarılıysa token, iptal/hata durumunda null döner.
+  /// Doğrulamayı başlatır. Başarılıysa token, iptal/zaman aşımında null döner.
   static Future<String?> solve(BuildContext context) async {
-    if (!supported) return null;
-    return showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      isDismissible: true,
-      backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => const _CaptchaSheet(),
-    );
+    if (_isMobile) {
+      return showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        isDismissible: true,
+        backgroundColor: AppTheme.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (_) => const _CaptchaSheet(),
+      );
+    }
+    return _solveInBrowser(context);
+  }
+
+  /// Masaüstü: yerel sunucu aç, tarayıcıda sayfayı aç, token'ı bekle.
+  static Future<String?> _solveInBrowser(BuildContext context) async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final completer = Completer<String?>();
+
+    server.listen((req) async {
+      req.response.headers
+        ..set('Access-Control-Allow-Origin', '*')
+        ..set('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        ..set('Access-Control-Allow-Headers', '*');
+      if (req.method == 'OPTIONS') {
+        req.response.statusCode = 204;
+        await req.response.close();
+        return;
+      }
+      if (req.uri.path == '/token' && req.method == 'POST') {
+        final body = await utf8.decoder.bind(req).join();
+        req.response
+          ..statusCode = 200
+          ..write('ok');
+        await req.response.close();
+        if (!completer.isCompleted) {
+          completer.complete(body.startsWith('ok:') ? body.substring(3) : null);
+        }
+        return;
+      }
+      req.response.statusCode = 404;
+      await req.response.close();
+    });
+
+    final url = Uri.parse('$kCaptchaPageUrl?port=${server.port}');
+    final opened = await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (!opened) {
+      await server.close(force: true);
+      return null;
+    }
+
+    final token = await completer.future
+        .timeout(const Duration(minutes: 3), onTimeout: () => null);
+    await server.close(force: true);
+    return token;
   }
 }
 
@@ -85,14 +139,10 @@ class _CaptchaSheetState extends State<_CaptchaSheet> {
         onMessageReceived: (msg) {
           if (!mounted) return;
           final m = msg.message;
-          if (m.startsWith('ok:')) {
-            Navigator.pop(context, m.substring(3));
-          } else {
-            Navigator.pop(context, null);
-          }
+          Navigator.pop(context, m.startsWith('ok:') ? m.substring(3) : null);
         },
       )
-      ..loadHtmlString(_turnstileHtml, baseUrl: 'https://gettic.dpdns.org');
+      ..loadHtmlString(_mobileHtml, baseUrl: 'https://gettic.dpdns.org');
   }
 
   @override
