@@ -24,19 +24,23 @@ class SupabaseService {
   // ==========================================
   // AUTH (KİMLİK DOĞRULAMA)
   // ==========================================
-  Future<AuthResponse> signInWithEmail(String email, String password) async {
+  Future<AuthResponse> signInWithEmail(String email, String password,
+      {String? captchaToken}) async {
     return await _client.auth.signInWithPassword(
       email: email.trim(),
       password: password,
+      captchaToken: captchaToken,
     );
   }
 
   Future<AuthResponse> signUpWithEmail(
-      String email, String password, String username) async {
+      String email, String password, String username,
+      {String? captchaToken}) async {
     return await _client.auth.signUp(
       email: email.trim(),
       password: password,
       data: {'username': username.trim(), 'full_name': username.trim()},
+      captchaToken: captchaToken,
     );
   }
 
