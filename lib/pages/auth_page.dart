@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/theme.dart';
 import 'password_reset_page.dart';
+import '../services/captcha_gate.dart';
 import '../core/constants.dart';
 import '../core/utils.dart';
 import '../core/security.dart';
@@ -429,6 +430,17 @@ class _AuthPageState extends State<AuthPage> {
       }
     }
 
+    // Güvenlik doğrulaması (Turnstile). Masaüstünde atlanır.
+    String? captchaToken;
+    if (CaptchaGate.supported) {
+      captchaToken = await CaptchaGate.solve(context);
+      if (!mounted) return;
+      if (captchaToken == null) {
+        setState(() => _error = 'Güvenlik doğrulaması tamamlanmadı');
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
       _error = null;
@@ -436,7 +448,8 @@ class _AuthPageState extends State<AuthPage> {
 
     try {
       if (_isLogin) {
-        await _service.signInWithEmail(email, _passwordController.text);
+        await _service.signInWithEmail(email, _passwordController.text,
+            captchaToken: captchaToken);
         await _LoginThrottle.clear(email);
         await _persistRemembered(email);
         TextInput.finishAutofillContext();
@@ -445,6 +458,7 @@ class _AuthPageState extends State<AuthPage> {
           email,
           _passwordController.text,
           _usernameController.text.trim(),
+          captchaToken: captchaToken,
         );
 
         if (response.user != null && response.session == null) {
@@ -541,8 +555,19 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
 
+    String? captchaToken;
+    if (CaptchaGate.supported) {
+      captchaToken = await CaptchaGate.solve(context);
+      if (!mounted) return;
+      if (captchaToken == null) {
+        _snack('Güvenlik doğrulaması tamamlanmadı', isError: true);
+        return;
+      }
+    }
+
     try {
-      await Supabase.instance.client.auth.resetPasswordForEmail(email);
+      await Supabase.instance.client.auth
+          .resetPasswordForEmail(email, captchaToken: captchaToken);
       _snack('Doğrulama kodu e-postanıza gönderildi ✓');
       if (mounted) {
         Navigator.push(
