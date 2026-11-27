@@ -57,6 +57,9 @@ class CaptchaGate {
 
   static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
+  /// Artık her platformda çalışır (mobil: WebView, masaüstü: tarayıcı).
+  static bool get supported => true;
+
   /// Doğrulamayı başlatır. Başarılıysa token, iptal/zaman aşımında null döner.
   static Future<String?> solve(BuildContext context) async {
     if (_isMobile) {
