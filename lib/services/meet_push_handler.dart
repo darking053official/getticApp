@@ -15,6 +15,7 @@ import '../models/profile.dart';
 import '../pages/chat_room_page.dart';
 import 'chat_lock_service.dart';
 import 'meet_log.dart';
+import 'supabase_service.dart';
 import 'meet_service.dart';
 
 void registerMeetPushHandlers() {
@@ -22,7 +23,14 @@ void registerMeetPushHandlers() {
     final data = event.notification.additionalData ?? {};
     if (data['type'] == 'chat_message') {
       final convId = data['conversationId']?.toString();
-      if (convId != null) _openChatFromPush(convId);
+      if (convId == null) return;
+      // "Okundu olarak işaretle" düğmesi: sohbeti açmadan okundu yap
+      if (event.result.actionId == 'read') {
+        SupabaseService().markConversationRead(convId);
+        return;
+      }
+      // "Yanıtla" ya da gövdeye dokunma: sohbeti aç
+      _openChatFromPush(convId);
       return;
     }
     if (data['type'] != 'meet_invite') return;
