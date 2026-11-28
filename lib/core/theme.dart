@@ -1,3 +1,11 @@
+// ============================================================
+// lib/core/theme.dart
+// (.txt olarak verildi. Projeye eklerken adını theme.dart yapın.)
+// Modern tema: daha canlı marka rengi, yumuşak yüzeyler, yuvarlak köşeler,
+// hafif kenarlıklar, sıkı başlık tipografisi.
+// Sayfalardaki isimler (AppTheme.primary, context.appColors vb.) aynen korunur.
+// ============================================================
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -31,32 +39,32 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.danger,
   });
 
-  /// Mevcut koyu tema renkleri (değişmedi, uygulama kimliği korunuyor)
+  /// Koyu tema: derin lacivert-siyah zemin, canlı violet vurgu
   static const AppColors dark = AppColors(
-    background: Color(0xFF0a0a0f),
-    surface: Color(0xFF12121a),
-    surfaceVariant: Color(0xFF1a1a24),
-    border: Color(0xFF1f1f2e),
-    primary: Color(0xFF7c3aed),
-    textPrimary: Color(0xFFf4f4f6),
-    textSecondary: Color(0xFFa1a1b0),
-    textHint: Color(0xFF6b6b7b),
-    online: Color(0xFF22c55e),
-    danger: Color(0xFFef4444),
+    background: Color(0xFF0B0B10),
+    surface: Color(0xFF15151D),
+    surfaceVariant: Color(0xFF1F1F2A),
+    border: Color(0xFF26263A),
+    primary: Color(0xFF8B5CF6),
+    textPrimary: Color(0xFFF5F5FA),
+    textSecondary: Color(0xFFA3A3B8),
+    textHint: Color(0xFF6E6E84),
+    online: Color(0xFF34D399),
+    danger: Color(0xFFF87171),
   );
 
-  /// Açık tema: aynı marka rengi, okunabilir yüzeyler
+  /// Açık tema: temiz beyaz yüzeyler, aynı marka ailesi
   static const AppColors light = AppColors(
-    background: Color(0xFFF6F6FA),
+    background: Color(0xFFF5F5F9),
     surface: Color(0xFFFFFFFF),
-    surfaceVariant: Color(0xFFEFEFF5),
-    border: Color(0xFFE3E3EC),
-    primary: Color(0xFF7c3aed),
-    textPrimary: Color(0xFF16161F),
-    textSecondary: Color(0xFF5C5C6C),
-    textHint: Color(0xFF9A9AAB),
-    online: Color(0xFF22c55e),
-    danger: Color(0xFFef4444),
+    surfaceVariant: Color(0xFFEEEEF4),
+    border: Color(0xFFE2E2EC),
+    primary: Color(0xFF7C3AED),
+    textPrimary: Color(0xFF111118),
+    textSecondary: Color(0xFF5B5B70),
+    textHint: Color(0xFF9B9BAE),
+    online: Color(0xFF10B981),
+    danger: Color(0xFFEF4444),
   );
 
   @override
@@ -113,26 +121,25 @@ extension AppThemeContext on BuildContext {
 class AppTheme {
   // ==========================================
   // ESKİ SABİTLER (geriye dönük uyumluluk)
-  // Mevcut sayfalar AppTheme.surface gibi isimleri kullanmaya devam eder.
   // Bunlar KOYU tema değerleridir. Açık temayı destekleyen sayfalarda
-  // bunun yerine context.appColors kullanın.
+  // context.appColors kullanın.
   // ==========================================
-  static const Color bgPrimary = Color(0xFF0a0a0f);
-  static const Color bgSecondary = Color(0xFF12121a);
-  static const Color bgTertiary = Color(0xFF1a1a24);
-  static const Color accent = Color(0xFF7c3aed);
-  static const Color textPrimary = Color(0xFFf4f4f6);
-  static const Color textSecondary = Color(0xFFa1a1b0);
-  static const Color border = Color(0xFF1f1f2e);
-  static const Color online = Color(0xFF22c55e);
-  static const Color danger = Color(0xFFef4444);
+  static const Color bgPrimary = Color(0xFF0B0B10);
+  static const Color bgSecondary = Color(0xFF15151D);
+  static const Color bgTertiary = Color(0xFF1F1F2A);
+  static const Color accent = Color(0xFF8B5CF6);
+  static const Color textPrimary = Color(0xFFF5F5FA);
+  static const Color textSecondary = Color(0xFFA3A3B8);
+  static const Color border = Color(0xFF26263A);
+  static const Color online = Color(0xFF34D399);
+  static const Color danger = Color(0xFFF87171);
 
   static const Color background = bgPrimary;
   static const Color surface = bgSecondary;
   static const Color primary = accent;
   static const Color inputBackground = bgTertiary;
   static const Color inputBorder = border;
-  static const Color textHint = Color(0xFF6b6b7b);
+  static const Color textHint = Color(0xFF6E6E84);
 
   // ==========================================
   // TEMALAR
@@ -144,7 +151,7 @@ class AppTheme {
   static final ThemeData dark = _build(AppColors.dark, Brightness.dark);
   static final ThemeData light = _build(AppColors.light, Brightness.light);
 
-  /// Eski API ile uyum için (main.dart'ta darkTheme olarak kullanılıyordu)
+  /// Eski API ile uyum için
   static ThemeData get darkTheme => dark;
   static ThemeData get lightTheme => light;
 
@@ -160,6 +167,11 @@ class AppTheme {
         return ThemeMode.dark;
     }
   }
+
+  // Modern köşe yarıçapları
+  static const double radiusSm = 12;
+  static const double radiusMd = 16;
+  static const double radiusLg = 22;
 
   static ThemeData _build(AppColors c, Brightness brightness) {
     final isDark = brightness == Brightness.dark;
@@ -177,6 +189,8 @@ class AppTheme {
       background: c.background,
       onBackground: c.textPrimary,
       outline: c.border,
+      surfaceVariant: c.surfaceVariant,
+      onSurfaceVariant: c.textSecondary,
     );
 
     final overlay = SystemUiOverlayStyle(
@@ -197,7 +211,7 @@ class AppTheme {
       extensions: <ThemeExtension<dynamic>>[c],
 
       appBarTheme: AppBarTheme(
-        backgroundColor: c.surface,
+        backgroundColor: c.background,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
@@ -206,7 +220,8 @@ class AppTheme {
         titleTextStyle: TextStyle(
           color: c.textPrimary,
           fontSize: 20,
-          fontWeight: FontWeight.bold,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.4,
           fontFamily: _fontFamily,
         ),
         systemOverlayStyle: overlay,
@@ -215,31 +230,32 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: c.surfaceVariant,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
         hintStyle: TextStyle(color: c.textHint, fontSize: 14),
         labelStyle: TextStyle(color: c.textSecondary, fontSize: 14),
         prefixIconColor: c.textSecondary,
         suffixIconColor: c.textSecondary,
-        border: _outline(c.border),
-        enabledBorder: _outline(c.border),
-        focusedBorder: _outline(c.primary, width: 1.5),
-        errorBorder: _outline(c.danger),
-        focusedErrorBorder: _outline(c.danger, width: 1.5),
+        border: _outline(Colors.transparent, radiusMd),
+        enabledBorder: _outline(Colors.transparent, radiusMd),
+        focusedBorder: _outline(c.primary, radiusMd, width: 1.5),
+        errorBorder: _outline(c.danger, radiusMd),
+        focusedErrorBorder: _outline(c.danger, radiusMd, width: 1.5),
       ),
 
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: c.primary,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: c.primary.withOpacity(0.4),
+          disabledBackgroundColor: c.primary.withOpacity(0.35),
           disabledForegroundColor: Colors.white70,
-          // Not: double.infinity, sayfaların tam genişlik butonlarını korur.
-          // Row içinde kullanılan butonlar için sayfada SizedBox ile sınırlayın.
-          minimumSize: const Size(double.infinity, 52),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          minimumSize: const Size(double.infinity, 54),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radiusMd),
+          ),
           textStyle: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
+            letterSpacing: -0.2,
             fontFamily: _fontFamily,
           ),
           elevation: 0,
@@ -259,9 +275,11 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: c.textPrimary,
-          minimumSize: const Size(double.infinity, 52),
+          minimumSize: const Size(double.infinity, 54),
           side: BorderSide(color: c.border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radiusMd),
+          ),
           textStyle: TextStyle(
             fontWeight: FontWeight.w600,
             fontFamily: _fontFamily,
@@ -272,7 +290,10 @@ class AppTheme {
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: c.primary,
         foregroundColor: Colors.white,
-        elevation: 4,
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusMd),
+        ),
       ),
 
       switchTheme: SwitchThemeData(
@@ -284,7 +305,7 @@ class AppTheme {
           if (states.contains(MaterialState.selected)) return c.primary;
           return c.surfaceVariant;
         }),
-        trackOutlineColor: MaterialStateProperty.all(c.border),
+        trackOutlineColor: MaterialStateProperty.all(Colors.transparent),
       ),
 
       checkboxTheme: CheckboxThemeData(
@@ -294,7 +315,7 @@ class AppTheme {
         }),
         checkColor: MaterialStateProperty.all(Colors.white),
         side: BorderSide(color: c.textSecondary, width: 1.5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
 
       radioTheme: RadioThemeData(
@@ -305,18 +326,20 @@ class AppTheme {
       ),
 
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: isDark ? c.surface : c.textPrimary,
+        backgroundColor: isDark ? c.surfaceVariant : c.textPrimary,
         contentTextStyle: TextStyle(
           color: isDark ? c.textPrimary : Colors.white,
           fontFamily: _fontFamily,
+          fontSize: 14,
         ),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        elevation: 4,
+        insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusSm)),
+        elevation: 0,
       ),
 
       dividerTheme: DividerThemeData(
-        color: c.border,
+        color: c.border.withOpacity(0.6),
         thickness: 1,
         space: 1,
       ),
@@ -324,10 +347,10 @@ class AppTheme {
       listTileTheme: ListTileThemeData(
         iconColor: c.textSecondary,
         textColor: c.textPrimary,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       ),
 
-      // Alt menü, AppBar ile aynı yüzey rengini kullanır (tutarlılık için)
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: c.surface,
         selectedItemColor: c.primary,
@@ -350,26 +373,33 @@ class AppTheme {
       dialogTheme: DialogTheme(
         backgroundColor: c.surface,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusLg)),
         titleTextStyle: TextStyle(
           color: c.textPrimary,
           fontSize: 18,
-          fontWeight: FontWeight.bold,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.3,
           fontFamily: _fontFamily,
         ),
         contentTextStyle: TextStyle(
           color: c.textSecondary,
           fontSize: 14,
+          height: 1.4,
           fontFamily: _fontFamily,
         ),
       ),
 
-      bottomSheetTheme: const BottomSheetThemeData(
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: c.surface,
+        modalBackgroundColor: c.surface,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        showDragHandle: true,
+        dragHandleColor: c.border,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
-      ).copyWith(backgroundColor: c.surface, modalBackgroundColor: c.surface),
+      ),
 
       chipTheme: ChipThemeData(
         backgroundColor: c.surfaceVariant,
@@ -379,8 +409,8 @@ class AppTheme {
         secondaryLabelStyle:
             TextStyle(color: Colors.white, fontFamily: _fontFamily),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        side: BorderSide(color: c.border),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusSm)),
+        side: BorderSide.none,
       ),
 
       progressIndicatorTheme: ProgressIndicatorThemeData(
@@ -395,36 +425,38 @@ class AppTheme {
     );
   }
 
-  static OutlineInputBorder _outline(Color color, {double width = 1}) {
+  static OutlineInputBorder _outline(Color color, double radius,
+      {double width = 1}) {
     return OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(radius),
       borderSide: BorderSide(color: color, width: width),
     );
   }
 
   static TextTheme _textTheme(AppColors c) {
-    TextStyle s(Color color, {FontWeight? weight}) => TextStyle(
+    TextStyle s(Color color, {FontWeight? weight, double? spacing}) => TextStyle(
           color: color,
           fontWeight: weight,
+          letterSpacing: spacing,
           fontFamily: _fontFamily,
         );
 
     return TextTheme(
-      displayLarge: s(c.textPrimary),
-      displayMedium: s(c.textPrimary),
-      displaySmall: s(c.textPrimary),
-      headlineLarge: s(c.textPrimary, weight: FontWeight.bold),
-      headlineMedium: s(c.textPrimary, weight: FontWeight.bold),
-      headlineSmall: s(c.textPrimary, weight: FontWeight.w600),
-      titleLarge: s(c.textPrimary, weight: FontWeight.w600),
-      titleMedium: s(c.textPrimary, weight: FontWeight.w500),
-      titleSmall: s(c.textPrimary, weight: FontWeight.w500),
-      bodyLarge: s(c.textPrimary),
-      bodyMedium: s(c.textPrimary),
+      displayLarge: s(c.textPrimary, weight: FontWeight.w800, spacing: -1),
+      displayMedium: s(c.textPrimary, weight: FontWeight.w800, spacing: -0.8),
+      displaySmall: s(c.textPrimary, weight: FontWeight.w700, spacing: -0.6),
+      headlineLarge: s(c.textPrimary, weight: FontWeight.w800, spacing: -0.6),
+      headlineMedium: s(c.textPrimary, weight: FontWeight.w700, spacing: -0.5),
+      headlineSmall: s(c.textPrimary, weight: FontWeight.w700, spacing: -0.4),
+      titleLarge: s(c.textPrimary, weight: FontWeight.w700, spacing: -0.3),
+      titleMedium: s(c.textPrimary, weight: FontWeight.w600, spacing: -0.2),
+      titleSmall: s(c.textPrimary, weight: FontWeight.w600),
+      bodyLarge: s(c.textPrimary, spacing: -0.1),
+      bodyMedium: s(c.textPrimary, spacing: -0.1),
       bodySmall: s(c.textSecondary),
       labelLarge: s(c.textPrimary, weight: FontWeight.w600),
-      labelMedium: s(c.textSecondary),
-      labelSmall: s(c.textSecondary),
+      labelMedium: s(c.textSecondary, weight: FontWeight.w500),
+      labelSmall: s(c.textSecondary, weight: FontWeight.w500),
     );
   }
 }
