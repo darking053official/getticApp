@@ -327,6 +327,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   bool _showEmoji = false;
   // Anında gösterilen, arka planda gönderilen mesajlar (localId -> durum)
   final Map<String, _Pend> _pend = {};
+  // Görsel URL çözme sonuçları: liste kaydırılınca yeniden çözülmesin
+  final Map<String, Future<String?>> _mediaUrlFutures = {};
+  static const double _mediaSize = 220;
   String? _typingName;
   String? _mentionQuery;
   Color _bubbleAccent = AppTheme.primary;
@@ -2731,40 +2734,45 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     );
   }
 
+  Widget _fixedMedia(Widget child) => ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(width: _mediaSize, height: _mediaSize, child: child),
+      );
+
   Widget _mediaImage(Message msg) {
     final path = _mediaPathOf(msg);
-    if (path == null) return _mediaError();
+    if (path == null) return _fixedMedia(_mediaError());
 
+    final future = _mediaUrlFutures.putIfAbsent(
+        path, () => _resolveMediaUrl(path, msg));
     return FutureBuilder<String?>(
-      future: _resolveMediaUrl(path, msg),
+      future: future,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return _mediaPlaceholder();
+          return _fixedMedia(_mediaPlaceholder());
         }
         final url = snap.data;
-        if (url == null) return _mediaError();
+        if (url == null) return _fixedMedia(_mediaError());
 
         return GestureDetector(
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => _ImageViewerPage(url: url)),
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 320),
-              child: url.startsWith('http')
-                  ? CachedNetworkImage(
-                      imageUrl: url,
-                      width: 220,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => _mediaPlaceholder(),
-                      errorWidget: (_, __, ___) => _mediaError(),
-                    )
-                  : Image.file(File(url),
-                      width: 220, fit: BoxFit.cover),
-            ),
-          ),
+          child: _fixedMedia(url.startsWith('http')
+              ? CachedNetworkImage(
+                  imageUrl: url,
+                  memCacheWidth: 440,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => _mediaPlaceholder(),
+                  errorWidget: (_, __, ___) => _mediaError(),
+                )
+              : Image.file(
+                  File(url),
+                  cacheWidth: 440,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _mediaError(),
+                )),
         );
       },
     );
