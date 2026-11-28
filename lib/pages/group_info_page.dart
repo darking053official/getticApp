@@ -214,7 +214,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
       // Yönetici ayrılmadan önce yetkiyi bir üyeye devretmeli
       final newAdmin = await showModalBottomSheet<Profile>(
         context: context,
-        backgroundColor: AppTheme.surface,
+        backgroundColor: context.appColors.surface,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
@@ -223,24 +223,24 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
             shrinkWrap: true,
             padding: const EdgeInsets.only(bottom: 12),
             children: [
-              const Padding(
+              Padding(
                 padding: EdgeInsets.all(16),
                 child: Text(
                   'Yöneticiliği kime devretmek istersiniz?',
                   style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: context.appColors.textPrimary,
                       fontSize: 16,
                       fontWeight: FontWeight.bold),
                 ),
               ),
               ...others.map((m) => ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: AppTheme.primary,
+                      backgroundColor: context.appColors.primary,
                       child: Text(m.initial,
                           style: const TextStyle(color: Colors.white)),
                     ),
                     title: Text(m.username,
-                        style: const TextStyle(color: AppTheme.textPrimary)),
+                        style: TextStyle(color: context.appColors.textPrimary)),
                     onTap: () => Navigator.pop(ctx, m),
                   )),
             ],
@@ -279,7 +279,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
-        backgroundColor: isError ? Colors.redAccent : AppTheme.primary,
+        backgroundColor: isError ? Colors.redAccent : context.appColors.primary,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -294,21 +294,21 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
     return showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        title: Text(title, style: const TextStyle(color: AppTheme.textPrimary)),
+        backgroundColor: context.appColors.surface,
+        title: Text(title, style: TextStyle(color: context.appColors.textPrimary)),
         content: Text(content,
-            style: const TextStyle(color: AppTheme.textSecondary)),
+            style: TextStyle(color: context.appColors.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
-            child: const Text('İptal',
-                style: TextStyle(color: AppTheme.textSecondary)),
+            child: Text('İptal',
+                style: TextStyle(color: context.appColors.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
             child: Text(confirm,
                 style: TextStyle(
-                    color: isDanger ? Colors.redAccent : AppTheme.primary)),
+                    color: isDanger ? Colors.redAccent : context.appColors.primary)),
           ),
         ],
       ),
@@ -318,7 +318,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
   void _memberOptions(Profile member) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.appColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -327,10 +327,10 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.admin_panel_settings_outlined,
-                  color: AppTheme.primary),
-              title: const Text('Yönetici yap',
-                  style: TextStyle(color: AppTheme.textPrimary)),
+              leading: Icon(Icons.admin_panel_settings_outlined,
+                  color: context.appColors.primary),
+              title: Text('Yönetici yap',
+                  style: TextStyle(color: context.appColors.textPrimary)),
               onTap: () {
                 Navigator.pop(ctx);
                 _makeAdmin(member);
@@ -360,18 +360,18 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
         if (!didPop) Navigator.pop(context, _currentName);
       },
       child: Scaffold(
-        backgroundColor: AppTheme.background,
+        backgroundColor: context.appColors.background,
         appBar: AppBar(
           title: const Text('Grup bilgileri'),
-          backgroundColor: AppTheme.background,
+          backgroundColor: context.appColors.background,
           elevation: 0,
           leading: BackButton(
             onPressed: () => Navigator.pop(context, _currentName),
           ),
         ),
         body: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: AppTheme.primary))
+            ? Center(
+                child: CircularProgressIndicator(color: context.appColors.primary))
             : ListView(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 children: [
@@ -382,7 +382,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                         children: [
                           CircleAvatar(
                             radius: 48,
-                            backgroundColor: AppTheme.primary,
+                            backgroundColor: context.appColors.primary,
                             backgroundImage: _avatarUrl != null
                                 ? CachedNetworkImageProvider(_avatarUrl!)
                                 : null,
@@ -398,13 +398,13 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                               child: Container(
                                 padding: const EdgeInsets.all(6),
                                 decoration: BoxDecoration(
-                                  color: AppTheme.surface,
+                                  color: context.appColors.surface,
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                      color: AppTheme.background, width: 2),
+                                      color: context.appColors.background, width: 2),
                                 ),
-                                child: const Icon(Icons.camera_alt,
-                                    size: 16, color: AppTheme.textSecondary),
+                                child: Icon(Icons.camera_alt,
+                                    size: 16, color: context.appColors.textSecondary),
                               ),
                             ),
                           if (_isBusy)
@@ -429,10 +429,10 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                       child: TextField(
                         controller: _nameController,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
-                            color: AppTheme.textPrimary),
+                            color: context.appColors.textPrimary),
                         decoration: const InputDecoration(
                           hintText: 'Grup adı',
                           border: InputBorder.none,
@@ -444,18 +444,18 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                     Center(
                       child: Text(
                         _currentName,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.bold,
-                            color: AppTheme.textPrimary),
+                            color: context.appColors.textPrimary),
                       ),
                     ),
                   const SizedBox(height: 4),
                   Center(
                     child: Text(
                       '${_members.length} üye',
-                      style: const TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 14),
+                      style: TextStyle(
+                          color: context.appColors.textSecondary, fontSize: 14),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -464,10 +464,10 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'ÜYELER',
                           style: TextStyle(
-                              color: AppTheme.textSecondary,
+                              color: context.appColors.textSecondary,
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                               letterSpacing: 1),
@@ -478,7 +478,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                             icon: const Icon(Icons.person_add_alt_1, size: 18),
                             label: const Text('Ekle'),
                             style: TextButton.styleFrom(
-                                foregroundColor: AppTheme.primary),
+                                foregroundColor: context.appColors.primary),
                           ),
                       ],
                     ),
@@ -495,7 +495,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                         ),
                       ),
                       leading: CircleAvatar(
-                        backgroundColor: AppTheme.primary,
+                        backgroundColor: context.appColors.primary,
                         backgroundImage: member.avatarUrl != null
                             ? CachedNetworkImageProvider(member.avatarUrl!)
                             : null,
@@ -511,17 +511,17 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                               isMe ? '${member.username} (Sen)' : member.username,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: AppTheme.textPrimary,
+                              style: TextStyle(
+                                  color: context.appColors.textPrimary,
                                   fontWeight: FontWeight.w500),
                             ),
                           ),
                           if (isAdminMember)
-                            const Padding(
+                            Padding(
                               padding: EdgeInsets.only(left: 8),
                               child: Text('Yönetici',
                                   style: TextStyle(
-                                      color: AppTheme.primary,
+                                      color: context.appColors.primary,
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold)),
                             ),
@@ -530,8 +530,8 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                       trailing: canManage
                           ? IconButton(
                               tooltip: 'Seçenekler',
-                              icon: const Icon(Icons.more_vert,
-                                  color: AppTheme.textSecondary),
+                              icon: Icon(Icons.more_vert,
+                                  color: context.appColors.textSecondary),
                               onPressed: () => _memberOptions(member),
                             )
                           : null,
@@ -603,8 +603,8 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
   Widget build(BuildContext context) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.75,
-      decoration: const BoxDecoration(
-        color: AppTheme.surface,
+      decoration: BoxDecoration(
+        color: context.appColors.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.only(
@@ -619,35 +619,35 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-                color: AppTheme.inputBorder,
+                color: context.appColors.border,
                 borderRadius: BorderRadius.circular(2)),
           ),
           const SizedBox(height: 16),
-          const Text('Üye ekle',
+          Text('Üye ekle',
               style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary)),
+                  color: context.appColors.textPrimary)),
           const SizedBox(height: 12),
           TextField(
             controller: _searchController,
             autofocus: true,
-            style: const TextStyle(color: AppTheme.textPrimary),
-            decoration: const InputDecoration(
+            style: TextStyle(color: context.appColors.textPrimary),
+            decoration: InputDecoration(
               hintText: 'Kullanıcı ara...',
-              prefixIcon: Icon(Icons.search, color: AppTheme.textSecondary),
+              prefixIcon: Icon(Icons.search, color: context.appColors.textSecondary),
             ),
             onChanged: _search,
           ),
           const SizedBox(height: 12),
           Expanded(
             child: _isSearching
-                ? const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary))
+                ? Center(
+                    child: CircularProgressIndicator(color: context.appColors.primary))
                 : _results.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Text('Kullanıcı yazarak arayın',
-                            style: TextStyle(color: AppTheme.textSecondary)))
+                            style: TextStyle(color: context.appColors.textSecondary)))
                     : ListView.builder(
                         itemCount: _results.length,
                         itemBuilder: (_, i) {
@@ -655,12 +655,12 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
                           final on = _selected.containsKey(u.id);
                           return CheckboxListTile(
                             value: on,
-                            activeColor: AppTheme.primary,
+                            activeColor: context.appColors.primary,
                             title: Text(u.username,
-                                style: const TextStyle(
-                                    color: AppTheme.textPrimary)),
+                                style: TextStyle(
+                                    color: context.appColors.textPrimary)),
                             secondary: CircleAvatar(
-                              backgroundColor: AppTheme.primary,
+                              backgroundColor: context.appColors.primary,
                               backgroundImage: u.avatarUrl != null
                                   ? CachedNetworkImageProvider(u.avatarUrl!)
                                   : null,
