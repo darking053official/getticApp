@@ -8,13 +8,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/theme.dart';
 import '../services/e2ee_chat.dart';
 import '../services/e2ee_device.dart';
 import '../services/e2ee_backup.dart';
 import '../services/e2ee_link.dart';
+import '../services/supabase_service.dart';
 
 class DeviceLinkPage extends StatefulWidget {
   const DeviceLinkPage({super.key});
@@ -108,6 +108,26 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
     await _init();
   }
 
+  /// Güncel anahtarı olmayan bütün sohbetler için yeni anahtar sürümü üretir ve bu cihaza sarar.
+  /// Mesaj göndermeye gerek yok. Anahtarı zaten güncel olan sohbetler atlanır.
+  Future<void> _refreshAllChats() async {
+    setState(() => _busy = true);
+    try {
+      final convs = await SupabaseService().getMyConversationsWithUnread();
+      var n = 0;
+      for (final c in convs) {
+        final id = c['conversation_id'].toString();
+        await E2eeChat.instance.rotateIfNeeded(id);
+        n++;
+      }
+      _snack('$n sohbet kontrol edildi');
+    } catch (e) {
+      _snack('Yenilenemedi: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   /// Yerel anahtarların sunucudaki kayıtla eşleşip eşleşmediğini kontrol eder.
   Future<void> _checkKeys() async {
     setState(() => _busy = true);
@@ -165,7 +185,7 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: isError ? Colors.redAccent : AppTheme.primary,
+      backgroundColor: isError ? Colors.redAccent : context.appColors.primary,
       behavior: SnackBarBehavior.floating,
     ));
   }
@@ -173,14 +193,14 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: context.appColors.background,
       appBar: AppBar(
         title: const Text('Cihaz bağlama'),
-        backgroundColor: AppTheme.background,
+        backgroundColor: context.appColors.background,
         elevation: 0,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
+          ? Center(child: CircularProgressIndicator(color: context.appColors.primary))
           : ListView(
               padding: const EdgeInsets.all(16),
               children: _approved ? _approvedView() : _pendingView(),
@@ -190,23 +210,23 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
 
   List<Widget> _pendingView() {
     return [
-      const Text(
+      Text(
         'Bu cihaz henüz onaylı değil',
-        style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 8),
-      const Text(
+      Text(
         'Mesajlarınızı görmek ve göndermek için mevcut bir cihazdan bu cihazı onaylamanız gerekiyor. '
         'Aşağıdaki metni o cihaza yapıştırın ve iki cihazda aynı kodun göründüğünü kontrol edin.',
-        style: TextStyle(color: AppTheme.textSecondary),
+        style: TextStyle(color: context.appColors.textSecondary),
       ),
       const SizedBox(height: 16),
       if (_code != null)
         Center(
           child: Text(
             _code!,
-            style: const TextStyle(
-              color: AppTheme.primary,
+            style: TextStyle(
+              color: context.appColors.primary,
               fontSize: 36,
               fontWeight: FontWeight.bold,
               letterSpacing: 6,
@@ -218,13 +238,13 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppTheme.surface,
+            color: context.appColors.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.inputBorder),
+            border: Border.all(color: context.appColors.border),
           ),
           child: SelectableText(
             _payload!,
-            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 12),
           ),
         ),
       const SizedBox(height: 8),
@@ -245,11 +265,11 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
         label: const Text('Yedekten geri yükle'),
       ),
       const SizedBox(height: 16),
-      const Row(
+      Row(
         children: [
           SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
           SizedBox(width: 10),
-          Text('Onay bekleniyor...', style: TextStyle(color: AppTheme.textSecondary)),
+          Text('Onay bekleniyor...', style: TextStyle(color: context.appColors.textSecondary)),
         ],
       ),
       if (_error != null) ...[
@@ -261,22 +281,22 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
 
   List<Widget> _approvedView() {
     return [
-      const Text(
+      Text(
         'Yeni cihaz onayla',
-        style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 8),
-      const Text(
+      Text(
         'Yeni cihazda gösterilen bağlantı metnini buraya yapıştırın. '
         'Kod, yeni cihazdaki kodla aynıysa onaylayın.',
-        style: TextStyle(color: AppTheme.textSecondary),
+        style: TextStyle(color: context.appColors.textSecondary),
       ),
       const SizedBox(height: 12),
       TextField(
         controller: _pasteCtl,
         minLines: 3,
         maxLines: 6,
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 12),
         decoration: const InputDecoration(hintText: 'Bağlantı metnini yapıştırın'),
         onChanged: (_) => _checkPaste(),
       ),
@@ -285,8 +305,8 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
         Center(
           child: Text(
             _pasteCode!,
-            style: const TextStyle(
-              color: AppTheme.primary,
+            style: TextStyle(
+              color: context.appColors.primary,
               fontSize: 32,
               fontWeight: FontWeight.bold,
               letterSpacing: 6,
@@ -306,17 +326,23 @@ class _DeviceLinkPageState extends State<DeviceLinkPage> {
         Text(_error!, style: const TextStyle(color: Colors.redAccent)),
       ],
       const SizedBox(height: 28),
-      const Divider(color: AppTheme.inputBorder),
+      Divider(color: context.appColors.border),
       const SizedBox(height: 12),
-      const Text(
+      Text(
         'Geçmişi diğer cihazlarla paylaş',
-        style: TextStyle(color: AppTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 6),
-      const Text(
+      Text(
         'Bu cihazın bildiği eski sohbet anahtarlarını bağlı diğer cihazlara gönderir. '
         'Eski mesajların o cihazlarda açılması için bu düğmeyi ilk (eski) cihazdan kullanın.',
-        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        style: TextStyle(color: context.appColors.textSecondary, fontSize: 13),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        onPressed: _busy ? null : _refreshAllChats,
+        icon: const Icon(Icons.sync, size: 18),
+        label: const Text('Tüm sohbetlerin anahtarlarını yenile'),
       ),
       const SizedBox(height: 12),
       OutlinedButton.icon(
