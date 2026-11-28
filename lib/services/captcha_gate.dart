@@ -67,7 +67,7 @@ class CaptchaGate {
         context: context,
         isScrollControlled: true,
         isDismissible: true,
-        backgroundColor: AppTheme.surface,
+        backgroundColor: context.appColors.surface,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
@@ -136,7 +136,7 @@ class _CaptchaSheetState extends State<_CaptchaSheet> {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(AppTheme.surface)
+      ..setBackgroundColor(context.appColors.surface)
       ..addJavaScriptChannel(
         'TurnstileChannel',
         onMessageReceived: (msg) {
@@ -156,10 +156,10 @@ class _CaptchaSheetState extends State<_CaptchaSheet> {
         child: Column(
           children: [
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Güvenlik doğrulaması',
               style: TextStyle(
-                color: AppTheme.textPrimary,
+                color: context.appColors.textPrimary,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
