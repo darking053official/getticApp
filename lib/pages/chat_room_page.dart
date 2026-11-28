@@ -334,18 +334,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   static const double _mediaSize = 220;
   String? _typingName;
   String? _mentionQuery;
-  Color _bubbleAccent = context.appColors.primary;
+  Color _bubbleAccent = const Color(0xFF8B5CF6);
   final Map<String, String> _memberAvatars = {};
   static const Map<String, List<Color>> kWallpaperPresets = {
     'ocean': [Color(0xFF0F2027), Color(0xFF2C5364)],
     'forest': [Color(0xFF134E5E), Color(0xFF0F3D2E)],
-    'night': [context.appColors.background, Color(0xFF1A1033)],
+    'night': [Color(0xFF0B0B10), Color(0xFF1A1033)],
     'rose': [Color(0xFF4A1942), Color(0xFF1A0B1F)],
     'sunset': [Color(0xFF41295A), Color(0xFF2F0743)],
   };
   String get _bubbleKey => 'bubble_color_${widget.conversationId}';
   static const List<Color> kBubbleColors = [
-    context.appColors.primary, Color(0xFF2563EB), Color(0xFF0D9488), Color(0xFFDB2777),
+    Color(0xFF8B5CF6), Color(0xFF2563EB), Color(0xFF0D9488), Color(0xFFDB2777),
     Color(0xFFEA580C), Color(0xFF16A34A), Color(0xFF475569),
   ];
   // Parti 1: tepkiler (mesaj id -> emoji -> kullanıcı id listesi), sabitleme
