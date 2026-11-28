@@ -56,6 +56,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Profile? _profile;
   bool _loadingProfile = true;
+  bool _muteAll = false;
   bool _showOnline = true;
   bool _showLastSeen = true;
   int _cacheBytes = -1; // -1: hesaplanıyor
@@ -73,12 +74,40 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _loadProfile();
+    _loadMuteAll();
     _refreshCacheSize();
   }
 
   // ==========================================
   // VERİ
   // ==========================================
+  Future<void> _loadMuteAll() async {
+    try {
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid == null) return;
+      final row = await Supabase.instance.client
+          .from('profiles')
+          .select('notifications_muted')
+          .eq('id', uid)
+          .maybeSingle();
+      if (mounted) setState(() => _muteAll = row?['notifications_muted'] == true);
+    } catch (_) {}
+  }
+
+  Future<void> _setMuteAll(bool v) async {
+    setState(() => _muteAll = v);
+    try {
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid == null) return;
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'notifications_muted': v}).eq('id', uid);
+    } catch (e) {
+      if (mounted) setState(() => _muteAll = !v);
+      _snack('Kaydedilemedi: $e', isError: true);
+    }
+  }
+
   Future<void> _loadProfile() async {
     try {
       final p = await _service.getMyProfile();
@@ -898,6 +927,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 _section('Bildirimler', c),
                 _card(c, [
                   const NotificationPrivacyTile(),
+                  _divider(c),
+                  _switch(c, Icons.notifications_off_outlined,
+                      'Tüm bildirimleri sessize al',
+                      subtitle: 'Açıkken sana mesaj bildirimi gelmez',
+                      value: _muteAll,
+                      onChanged: _setMuteAll),
                   _divider(c),
                   _switch(c, Icons.notifications_active_outlined,
                       'Uygulama içi bildirimler',
