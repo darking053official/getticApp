@@ -78,14 +78,14 @@ class _AdminPageState extends State<AdminPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: context.appColors.surface,
         title: Text(banned ? 'Banı kaldır' : 'Kullanıcıyı banla',
-            style: const TextStyle(color: AppTheme.textPrimary)),
+            style: TextStyle(color: context.appColors.textPrimary)),
         content: Text(
           banned
               ? '$name kullanıcısının banı kaldırılsın mı?'
               : '$name banlansın mı? Kullanıcı giriş yapamaz.',
-          style: const TextStyle(color: AppTheme.textSecondary),
+          style: TextStyle(color: context.appColors.textSecondary),
         ),
         actions: [
           TextButton(
@@ -95,7 +95,7 @@ class _AdminPageState extends State<AdminPage> {
               onPressed: () => Navigator.pop(ctx, true),
               child: Text(banned ? 'Kaldır' : 'Banla',
                   style: TextStyle(
-                      color: banned ? AppTheme.primary : Colors.redAccent))),
+                      color: banned ? context.appColors.primary : Colors.redAccent))),
         ],
       ),
     );
@@ -117,7 +117,7 @@ class _AdminPageState extends State<AdminPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: isError ? Colors.redAccent : AppTheme.primary,
+      backgroundColor: isError ? Colors.redAccent : context.appColors.primary,
       behavior: SnackBarBehavior.floating,
     ));
   }
@@ -125,10 +125,10 @@ class _AdminPageState extends State<AdminPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: context.appColors.background,
       appBar: AppBar(
         title: const Text('Yönetici paneli'),
-        backgroundColor: AppTheme.background,
+        backgroundColor: context.appColors.background,
         elevation: 0,
       ),
       body: Column(
@@ -137,10 +137,10 @@ class _AdminPageState extends State<AdminPage> {
             padding: const EdgeInsets.all(16),
             child: TextField(
               controller: _searchCtl,
-              style: const TextStyle(color: AppTheme.textPrimary),
-              decoration: const InputDecoration(
+              style: TextStyle(color: context.appColors.textPrimary),
+              decoration: InputDecoration(
                 hintText: 'Kullanıcı adı ara (en az 2 harf)',
-                prefixIcon: Icon(Icons.search, color: AppTheme.textSecondary),
+                prefixIcon: Icon(Icons.search, color: context.appColors.textSecondary),
               ),
               onChanged: _onChanged,
             ),
@@ -153,8 +153,8 @@ class _AdminPageState extends State<AdminPage> {
             ),
           Expanded(
             child: _loading
-                ? const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary))
+                ? Center(
+                    child: CircularProgressIndicator(color: context.appColors.primary))
                 : ListView.builder(
                     itemCount: _results.length,
                     itemBuilder: (_, i) {
@@ -163,7 +163,7 @@ class _AdminPageState extends State<AdminPage> {
                       final isAdmin = u['role'] == 'admin';
                       return ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: AppTheme.primary,
+                          backgroundColor: context.appColors.primary,
                           child: Text(
                             (u['username'] ?? '?').toString().isNotEmpty
                                 ? (u['username'] as String)[0].toUpperCase()
@@ -172,7 +172,7 @@ class _AdminPageState extends State<AdminPage> {
                           ),
                         ),
                         title: Text(u['username']?.toString() ?? '',
-                            style: const TextStyle(color: AppTheme.textPrimary)),
+                            style: TextStyle(color: context.appColors.textPrimary)),
                         subtitle: Text(
                           [
                             if (isAdmin) 'Yönetici',
@@ -181,7 +181,7 @@ class _AdminPageState extends State<AdminPage> {
                           style: TextStyle(
                               color: banned
                                   ? Colors.redAccent
-                                  : AppTheme.textSecondary),
+                                  : context.appColors.textSecondary),
                         ),
                         trailing: isAdmin
                             ? null
@@ -190,7 +190,7 @@ class _AdminPageState extends State<AdminPage> {
                                 child: Text(banned ? 'Ban kaldır' : 'Banla',
                                     style: TextStyle(
                                         color: banned
-                                            ? AppTheme.primary
+                                            ? context.appColors.primary
                                             : Colors.redAccent)),
                               ),
                       );
