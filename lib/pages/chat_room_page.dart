@@ -1998,6 +1998,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       appBar: _buildAppBar(),
       body: Column(
         children: [
+          _buildPinnedBanner(),
           Expanded(
             child: _isLoading
                 ? const Center(
@@ -2007,8 +2008,6 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     child: _buildMessagesList(),
                   ),
           ),
-
-          _buildPinnedBanner(),
 
           if (_isUploading)
             Container(
