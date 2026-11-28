@@ -327,6 +327,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   bool _showEmoji = false;
   // Anında gösterilen, arka planda gönderilen mesajlar (localId -> durum)
   final Map<String, _Pend> _pend = {};
+  String? _typingName;
+  String? _mentionQuery;
+  Color _bubbleAccent = AppTheme.primary;
+  final Map<String, String> _memberAvatars = {};
+  static const List<Color> kBubbleColors = [
+    Color(0xFF7C3AED), Color(0xFF2563EB), Color(0xFF0D9488), Color(0xFFDB2777),
+    Color(0xFFEA580C), Color(0xFF16A34A), Color(0xFF475569),
+  ];
   // Parti 1: tepkiler (mesaj id -> emoji -> kullanıcı id listesi), sabitleme
   Map<String, Map<String, List<String>>> _reactionUsers = {};
   String? _pinnedId;
@@ -345,6 +353,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     super.initState();
     AppState().setActiveConversation(widget.conversationId);
     _loadCachedMessages();
+    _loadBubbleColor();
     _subscribeToMessages();
     _subscribeToTyping();
     _subscribeToReads();
@@ -365,6 +374,26 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   }
 
   /// Uygulama arka plandayken mesajlar okundu işaretlenmez (gizlilik).
+  @override
+  void didChangeMetrics() {
+    // Klavye açılınca son mesajlar görünür kalsın
+    if (WidgetsBinding.instance.platformDispatcher.views.first.viewInsets.bottom > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom(animated: false));
+    }
+  }
+
+  Future<void> _loadBubbleColor() async {
+    final p = await SharedPreferences.getInstance();
+    final v = p.getInt('bubble_color');
+    if (v != null && mounted) setState(() => _bubbleAccent = Color(v));
+  }
+
+  Future<void> _setBubbleColor(Color c) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt('bubble_color', c.value);
+    if (mounted) setState(() => _bubbleAccent = c);
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final fg = state == AppLifecycleState.resumed;
@@ -571,6 +600,35 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text('Baloncuk rengi',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary, fontWeight: FontWeight.w600)),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Wrap(
+                  spacing: 12,
+                  children: [
+                    for (final c in kBubbleColors)
+                      GestureDetector(
+                        onTap: () {
+                          _setBubbleColor(c);
+                          setS(() {});
+                        },
+                        child: CircleAvatar(
+                          radius: 16,
+                          backgroundColor: c,
+                          child: _bubbleAccent.value == c.value
+                              ? const Icon(Icons.check, color: Colors.white, size: 18)
+                              : null,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
               const SizedBox(height: 12),
               Container(
                 width: 40,
@@ -1097,6 +1155,12 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     if (!mounted) return;
     setState(() {
       _memberNames = {for (final p in list) p.id: p.username};
+      _memberAvatars
+        ..clear()
+        ..addAll({
+          for (final p in list)
+            if (p.avatarUrl != null) p.id: p.avatarUrl!,
+        });
     });
   }
 
@@ -1144,7 +1208,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       widget.conversationId,
       (username) {
         if (!mounted) return;
-        setState(() => _isOtherTyping = true);
+        setState(() {
+          _isOtherTyping = true;
+          _typingName = username;
+        });
         _typingTimer?.cancel();
         _typingTimer = Timer(const Duration(seconds: 4), () {
           if (mounted) setState(() => _isOtherTyping = false);
@@ -1158,6 +1225,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   /// Yazarken her 2 saniyede bir "yazıyor" olayı gönderir (duraklamayı beklemez).
   void _onTyping(String text) {
+    if (widget.isGroup) {
+      final q = RegExp(r'@([^\s@]*)$').firstMatch(text)?.group(1);
+      if (q != _mentionQuery) setState(() => _mentionQuery = q);
+    }
     if (text.trim().isEmpty) return;
     final now = DateTime.now();
     if (_lastTypingSent == null ||
@@ -1167,11 +1238,71 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     }
   }
 
+  Widget _buildMentionList() {
+    final me = _service.currentUser?.id;
+    final q = (_mentionQuery ?? '').toLowerCase();
+    final items = _memberNames.entries
+        .where((e) => e.key != me && e.value.toLowerCase().startsWith(q))
+        .take(6)
+        .toList();
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: items
+            .map((e) => ListTile(
+                  dense: true,
+                  title: Text('@${e.value}',
+                      style: const TextStyle(color: AppTheme.textPrimary)),
+                  onTap: () => _insertMention(e.value),
+                ))
+            .toList(),
+      ),
+    );
+  }
+
+  void _insertMention(String name) {
+    final replaced = _controller.text
+        .replaceFirst(RegExp(r'@[^\s@]*$'), '@$name ');
+    _controller.value = TextEditingValue(
+      text: replaced,
+      selection: TextSelection.collapsed(offset: replaced.length),
+    );
+    setState(() => _mentionQuery = null);
+  }
+
+  Future<void> _openMemberProfile(String id) async {
+    try {
+      final row = await Supabase.instance.client
+          .from('profiles')
+          .select()
+          .eq('id', id)
+          .maybeSingle();
+      if (row == null || !mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProfilePreviewPage(
+            profile: Profile.fromJson(Map<String, dynamic>.from(row)),
+          ),
+        ),
+      );
+    } catch (_) {}
+  }
+
   Future<void> _sendTypingEvent() async {
     try {
       await _service.sendTypingEvent(
         widget.conversationId,
-        _service.currentUser?.email?.split('@').first ?? 'Biri',
+        (_service.currentUser?.userMetadata?['username'] ??
+                _service.currentUser?.email?.split('@').first ??
+                'Biri')
+            .toString(),
       );
     } catch (_) {}
   }
@@ -2066,7 +2197,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '${widget.otherUser.username} yazıyor',
+                    widget.isGroup
+                        ? '${_typingName ?? 'Biri'} yazıyor'
+                        : '${widget.otherUser.username} yazıyor',
                     style: const TextStyle(
                         color: AppTheme.textSecondary, fontSize: 12),
                   ),
@@ -2074,6 +2207,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               ),
             ),
 
+          if (widget.isGroup && _mentionQuery != null) _buildMentionList(),
           if (_replyTo != null) _buildReplyPreview(),
 
           _isRecording ? _buildRecordingBar() : _buildInputBar(),
@@ -2276,8 +2410,45 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   Widget _buildBubble(Message msg, bool isMine, DateTime? createdAt,
       {bool grouped = false}) {
+    final core = _buildBubbleCore(msg, isMine, createdAt, grouped: grouped);
+    if (!widget.isGroup || isMine) return core;
+    final avatar = _memberAvatars[msg.senderId];
+    final name = _memberNames[msg.senderId] ?? '?';
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        SizedBox(
+          width: 40,
+          child: grouped
+              ? null
+              : Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: GestureDetector(
+                    onTap: () => _openMemberProfile(msg.senderId),
+                    child: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: AppTheme.primary,
+                      backgroundImage: avatar != null
+                          ? CachedNetworkImageProvider(avatar)
+                          : null,
+                      child: avatar == null
+                          ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 11))
+                          : null,
+                    ),
+                  ),
+                ),
+        ),
+        Expanded(child: core),
+      ],
+    );
+  }
+
+  Widget _buildBubbleCore(Message msg, bool isMine, DateTime? createdAt,
+      {bool grouped = false}) {
     final maxW = MediaQuery.of(context).size.width * 0.78;
-    final bubbleColor = isMine ? AppTheme.primary : AppTheme.surface;
+    final bubbleColor = isMine ? _bubbleAccent : AppTheme.surface;
     final textColor = isMine ? Colors.white : AppTheme.textPrimary;
     final metaColor = isMine ? Colors.white70 : AppTheme.textSecondary;
     final read = isMine && _isReadByOther(msg);
@@ -2445,6 +2616,29 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     );
   }
 
+  Widget _mentionText(String text, Color color) {
+    final matches = RegExp(r'@[^\s@]+').allMatches(text).toList();
+    if (matches.isEmpty) {
+      return Text(text, style: TextStyle(color: color, fontSize: 15));
+    }
+    final spans = <TextSpan>[];
+    var last = 0;
+    for (final m in matches) {
+      if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
+      spans.add(TextSpan(
+        text: m.group(0),
+        style: const TextStyle(
+            fontWeight: FontWeight.bold, color: Color(0xFFC4B5FD)),
+      ));
+      last = m.end;
+    }
+    if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
+    return Text.rich(TextSpan(
+      style: TextStyle(color: color, fontSize: 15),
+      children: spans,
+    ));
+  }
+
   Widget _buildMessageBody(Message msg, bool isMine, Color textColor) {
     if (msg.isDeleted) {
       return Text(
@@ -2482,10 +2676,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       default:
         final text = msg.content ?? '';
         final link = RegExp(r'https?://[^\s]+').firstMatch(text)?.group(0);
-        final body = Text(
-          text,
-          style: TextStyle(color: textColor, fontSize: 15),
-        );
+        final body = _mentionText(text, textColor);
         if (link == null) return body;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
