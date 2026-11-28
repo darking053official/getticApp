@@ -6,7 +6,7 @@ class AppConstants {
 
   // --- UYGULAMA BİLGİLERİ ---
   static const String appName = 'Gettic';
-  static const String appVersion = '1.0.4';
+  static const String appVersion = '1.0.5';
   
   // --- LİMİTLER ---
   static const int messageMaxLength = 2000;
