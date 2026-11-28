@@ -31,6 +31,7 @@ import '../services/chat_outbox.dart';
 import '../services/e2ee_media.dart';
 import '../services/e2ee_chat.dart';
 import '../services/chat_cache.dart';
+import '../services/chat_prefs_service.dart';
 
 // ============================================================
 // AYARLAR
@@ -334,6 +335,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   String? _mentionQuery;
   Color _bubbleAccent = AppTheme.primary;
   final Map<String, String> _memberAvatars = {};
+  static const Map<String, List<Color>> kWallpaperPresets = {
+    'ocean': [Color(0xFF0F2027), Color(0xFF2C5364)],
+    'forest': [Color(0xFF134E5E), Color(0xFF0F3D2E)],
+    'night': [Color(0xFF0A0A0F), Color(0xFF1A1033)],
+    'rose': [Color(0xFF4A1942), Color(0xFF1A0B1F)],
+    'sunset': [Color(0xFF41295A), Color(0xFF2F0743)],
+  };
+  String get _bubbleKey => 'bubble_color_${widget.conversationId}';
   static const List<Color> kBubbleColors = [
     Color(0xFF7C3AED), Color(0xFF2563EB), Color(0xFF0D9488), Color(0xFFDB2777),
     Color(0xFFEA580C), Color(0xFF16A34A), Color(0xFF475569),
@@ -357,6 +366,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     AppState().setActiveConversation(widget.conversationId);
     _loadCachedMessages();
     _loadBubbleColor();
+    _loadServerPrefs();
     _subscribeToMessages();
     _subscribeToTyping();
     _subscribeToReads();
@@ -387,14 +397,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   Future<void> _loadBubbleColor() async {
     final p = await SharedPreferences.getInstance();
-    final v = p.getInt('bubble_color');
+    final v = p.getInt(_bubbleKey);
     if (v != null && mounted) setState(() => _bubbleAccent = Color(v));
   }
 
   Future<void> _setBubbleColor(Color c) async {
     final p = await SharedPreferences.getInstance();
-    await p.setInt('bubble_color', c.value);
+    await p.setInt(_bubbleKey, c.value);
     if (mounted) setState(() => _bubbleAccent = c);
+    try {
+      await ChatPrefsService.instance
+          .save(widget.conversationId, bubbleColor: c.value);
+    } catch (_) {}
   }
 
   @override
@@ -553,7 +567,123 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     setState(() {});
   }
 
+  Future<void> _loadServerPrefs() async {
+    try {
+      final row = await ChatPrefsService.instance.load(widget.conversationId);
+      if (row == null || !mounted) return;
+      final bc = row['bubble_color'] as int?;
+      final wp = row['wallpaper'] as String?;
+      setState(() {
+        if (bc != null) _bubbleAccent = Color(bc);
+        _wallpaper = wp;
+      });
+      final prefs = await SharedPreferences.getInstance();
+      if (bc != null) await prefs.setInt(_bubbleKey, bc);
+      if (wp == null) {
+        await prefs.remove(_wallpaperKey);
+      } else {
+        await prefs.setString(_wallpaperKey, wp);
+      }
+    } catch (_) {}
+  }
+
+  /// Duvar kağıdını ayarlar: 'preset:<ad>', 'url:<adres>' ya da null (kaldır).
+  Future<void> _setWallpaperValue(String? value) async {
+    setState(() => _wallpaper = value);
+    final prefs = await SharedPreferences.getInstance();
+    if (value == null) {
+      await prefs.remove(_wallpaperKey);
+    } else {
+      await prefs.setString(_wallpaperKey, value);
+    }
+    try {
+      if (value == null) {
+        await ChatPrefsService.instance
+            .save(widget.conversationId, clearWallpaper: true);
+      } else {
+        await ChatPrefsService.instance
+            .save(widget.conversationId, wallpaper: value);
+      }
+    } catch (e) {
+      _showSnack('Sunucuya kaydedilemedi: $e', isError: true);
+    }
+  }
+
   BoxDecoration? _wallpaperDecoration() {
+    final p = _wallpaper;
+    if (p == null) return null;
+    if (p.startsWith('preset:')) {
+      final colors = kWallpaperPresets[p.substring(7)];
+      if (colors == null) return null;
+      return BoxDecoration(
+        gradient: LinearGradient(
+          colors: colors,
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      );
+    }
+    if (p.startsWith('url:')) {
+      return BoxDecoration(
+        image: DecorationImage(
+          image: CachedNetworkImageProvider(p.substring(4)),
+          fit: BoxFit.cover,
+          colorFilter:
+              ColorFilter.mode(Colors.black.withOpacity(0.35), BlendMode.darken),
+        ),
+      );
+    }
+    // Eski yerel dosya kayıtları (yalnızca bu cihazda geçerli)
+    if (!File(p).existsSync()) return null;
+    return BoxDecoration(
+      image: DecorationImage(
+        image: FileImage(File(p)),
+        fit: BoxFit.cover,
+        colorFilter:
+            ColorFilter.mode(Colors.black.withOpacity(0.35), BlendMode.darken),
+      ),
+    );
+  }
+
+  void _showPresetPicker() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final e in kWallpaperPresets.entries)
+                GestureDetector(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _setWallpaperValue('preset:${e.key}');
+                  },
+                  child: Container(
+                    width: 64,
+                    height: 96,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      gradient: LinearGradient(
+                        colors: e.value,
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                      border: Border.all(color: AppTheme.inputBorder),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  BoxDecoration? _legacyWallpaperDecoration() {
     final p = _wallpaper;
     if (p == null || !File(p).existsSync()) return null;
     return BoxDecoration(
@@ -573,16 +703,17 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       imageQuality: 85,
     );
     if (picked == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_wallpaperKey, picked.path);
-    if (mounted) setState(() => _wallpaper = picked.path);
+    try {
+      _showSnack('Arka plan yükleniyor...');
+      final url = await ChatPrefsService.instance
+          .uploadWallpaper(File(picked.path), widget.conversationId);
+      await _setWallpaperValue('url:$url');
+    } catch (e) {
+      _showSnack('Yüklenemedi: $e', isError: true);
+    }
   }
 
-  Future<void> _removeWallpaper() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_wallpaperKey);
-    if (mounted) setState(() => _wallpaper = null);
-  }
+  Future<void> _removeWallpaper() => _setWallpaperValue(null);
 
   String _disappearLabel(int? secs) {
     if (secs == null) return 'Kapalı';
@@ -715,6 +846,15 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 onTap: () async {
                   Navigator.pop(ctx);
                   await _pickWallpaper();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.palette_outlined, color: AppTheme.primary),
+                title: const Text('Hazır arka planlar',
+                    style: TextStyle(color: AppTheme.textPrimary)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showPresetPicker();
                 },
               ),
               if (_wallpaper != null)
