@@ -43,15 +43,28 @@ Future<void> _openChatFromPush(String convId) async {
     final sb = Supabase.instance.client;
     final me = sb.auth.currentUser?.id;
     if (me == null) return;
-    final row = await sb
-        .from('conversation_members')
-        .select('user_id, profiles(*)')
-        .eq('conversation_id', convId)
-        .neq('user_id', me)
-        .limit(1)
+    final conv = await sb
+        .from('conversations')
+        .select('type, name, created_by')
+        .eq('id', convId)
         .maybeSingle();
-    final p = row?['profiles'];
-    if (p == null) return;
+    if (conv == null) return;
+    final isGroup = conv['type'] == 'group';
+
+    Profile? other;
+    if (!isGroup) {
+      final row = await sb
+          .from('conversation_members')
+          .select('user_id, profiles(*)')
+          .eq('conversation_id', convId)
+          .neq('user_id', me)
+          .limit(1)
+          .maybeSingle();
+      final p = row?['profiles'];
+      if (p == null) return;
+      other = Profile.fromJson(Map<String, dynamic>.from(p as Map));
+    }
+
     final nav = appNavigatorKey.currentState;
     if (nav == null) return;
     // Kilitli sohbetse bildirimden de PIN iste
@@ -60,7 +73,11 @@ Future<void> _openChatFromPush(String convId) async {
     nav.push(MaterialPageRoute(
       builder: (_) => ChatRoomPage(
         conversationId: convId,
-        otherUser: Profile.fromJson(Map<String, dynamic>.from(p as Map)),
+        otherUser: other ??
+            Profile(id: '', username: (conv['name'] ?? 'Grup').toString()),
+        isGroup: isGroup,
+        groupName: conv['name'] as String?,
+        groupCreatedBy: conv['created_by'] as String?,
       ),
     ));
   } catch (e) {
