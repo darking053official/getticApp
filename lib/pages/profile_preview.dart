@@ -1,5 +1,10 @@
-import 'package:flutter/material.dart';
+// lib/pages/profile_preview_page.dart
+// (.txt olarak verildi. Projeye eklerken adını profile_preview_page.dart yapın.)
+// Başka bir kullanıcının profil önizlemesi. Durum: kullanıcının seçtiği mod (Aktif, Boşta, Rahatsız etmeyin).
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+
 import '../core/theme.dart';
 import '../models/profile.dart';
 
@@ -17,47 +22,54 @@ class ProfilePreviewPage extends StatelessWidget {
     this.onReportTap,
   });
 
+  Color _modeColor() {
+    switch (profile.mode) {
+      case 'idle':
+        return Colors.amber;
+      case 'dnd':
+        return Colors.redAccent;
+      default:
+        return Colors.green;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
+    final hasAvatar = profile.avatarUrl != null && profile.avatarUrl!.isNotEmpty;
+
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: c.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        iconTheme: const IconThemeData(color: AppTheme.textPrimary),
+        iconTheme: IconThemeData(color: c.textPrimary),
       ),
       extendBodyBehindAppBar: true,
       body: SingleChildScrollView(
         child: Column(
           children: [
-            // --- KAPAK VE AVATAR ALANI ---
+            // Kapak ve avatar
             Container(
               height: 250,
               width: double.infinity,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [
-                    AppTheme.primary.withOpacity(0.4),
-                    AppTheme.background,
-                  ],
+                  colors: [c.primary.withOpacity(0.4), c.background],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                 ),
               ),
               child: Center(
                 child: GestureDetector(
-                  onTap: () {
-                    if (profile.avatarUrl != null) {
-                      _showFullImage(context, profile.avatarUrl!);
-                    }
-                  },
+                  onTap: hasAvatar ? () => _showFullImage(context, profile.avatarUrl!) : null,
                   child: Container(
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: AppTheme.primary, width: 3),
+                      border: Border.all(color: c.primary, width: 3),
                       boxShadow: [
                         BoxShadow(
-                          color: AppTheme.primary.withOpacity(0.3),
+                          color: c.primary.withOpacity(0.3),
                           blurRadius: 20,
                           spreadRadius: 4,
                         ),
@@ -65,37 +77,35 @@ class ProfilePreviewPage extends StatelessWidget {
                     ),
                     child: CircleAvatar(
                       radius: 65,
-                      backgroundColor: AppTheme.surface,
-                      backgroundImage: profile.avatarUrl != null
+                      backgroundColor: c.surface,
+                      backgroundImage: hasAvatar
                           ? CachedNetworkImageProvider(profile.avatarUrl!)
                           : null,
-                      child: profile.avatarUrl == null
-                          ? Text(
-                              profile.username.isNotEmpty
-                                  ? profile.username[0].toUpperCase()
-                                  : '?',
+                      child: hasAvatar
+                          ? null
+                          : Text(
+                              profile.initial,
                               style: const TextStyle(
                                 fontSize: 45,
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
                               ),
-                            )
-                          : null,
+                            ),
                     ),
                   ),
                 ),
               ),
             ),
 
-            // --- BİLGİ ALANI ---
+            // Bilgi
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Column(
                 children: [
                   Text(
                     profile.username,
-                    style: const TextStyle(
-                      color: AppTheme.textPrimary,
+                    style: TextStyle(
+                      color: c.textPrimary,
                       fontSize: 26,
                       fontWeight: FontWeight.bold,
                     ),
@@ -105,22 +115,19 @@ class ProfilePreviewPage extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       profile.fullName!,
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 16,
-                      ),
+                      style: TextStyle(color: c.textSecondary, fontSize: 16),
                       textAlign: TextAlign.center,
                     ),
                   ],
                   const SizedBox(height: 16),
-                  
-                  // Durum Bilgisi
+
+                  // Durum modu
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      color: AppTheme.surface,
+                      color: c.surface,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: AppTheme.inputBorder),
+                      border: Border.all(color: c.border),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -129,17 +136,15 @@ class ProfilePreviewPage extends StatelessWidget {
                           width: 8,
                           height: 8,
                           decoration: BoxDecoration(
-                            color: profile.status == 'online'
-                                ? AppTheme.online
-                                : AppTheme.textSecondary,
+                            color: _modeColor(),
                             shape: BoxShape.circle,
                           ),
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          profile.status == 'online' ? 'Çevrimiçi' : 'Çevrimdışı',
-                          style: const TextStyle(
-                            color: AppTheme.textPrimary,
+                          profile.modeLabel,
+                          style: TextStyle(
+                            color: c.textPrimary,
                             fontSize: 14,
                             fontWeight: FontWeight.w500,
                           ),
@@ -150,62 +155,51 @@ class ProfilePreviewPage extends StatelessWidget {
 
                   const SizedBox(height: 40),
 
-                  // --- AKSİYON BUTONLARI ---
-                  Row(
-                    children: [
-                      // Mesaj Gönder Butonu
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: onMessageTap ?? () => Navigator.pop(context),
-                          icon: const Icon(Icons.chat_bubble_outline),
-                          label: const Text('Mesaj Gönder'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primary,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size(0, 52),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
+                  // Aksiyon
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: onMessageTap ?? () => Navigator.pop(context),
+                      icon: const Icon(Icons.chat_bubble_outline),
+                      label: const Text('Mesaj Gönder'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: c.primary,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 52),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                    ],
+                    ),
                   ),
 
                   const SizedBox(height: 20),
 
-                  // --- GÜVENLİK SEÇENEKLERİ ---
+                  // Güvenlik
                   Container(
                     decoration: BoxDecoration(
-                      color: AppTheme.surface,
+                      color: c.surface,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppTheme.inputBorder),
+                      border: Border.all(color: c.border),
                     ),
                     child: Column(
                       children: [
                         ListTile(
                           leading: const Icon(Icons.block, color: Colors.orange),
-                          title: const Text(
-                            'Kullanıcıyı Engelle',
-                            style: TextStyle(color: AppTheme.textPrimary),
-                          ),
-                          subtitle: const Text(
-                            'Bu kullanıcıdan gelen mesajları alma',
-                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                          ),
+                          title: Text('Kullanıcıyı Engelle',
+                              style: TextStyle(color: c.textPrimary)),
+                          subtitle: Text('Bu kullanıcıdan gelen mesajları alma',
+                              style: TextStyle(color: c.textSecondary, fontSize: 12)),
                           onTap: onBlockTap ?? () {},
                         ),
-                        const Divider(color: AppTheme.inputBorder, height: 1, indent: 56),
+                        Divider(color: c.border, height: 1, indent: 56),
                         ListTile(
-                          leading: const Icon(Icons.report_gmailerrorred, color: Colors.redAccent),
-                          title: const Text(
-                            'Kullanıcıyı Bildir',
-                            style: TextStyle(color: AppTheme.textPrimary),
-                          ),
-                          subtitle: const Text(
-                            'Uygunsuz davranışı bildir',
-                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                          ),
+                          leading: const Icon(Icons.report_gmailerrorred,
+                              color: Colors.redAccent),
+                          title: Text('Kullanıcıyı Bildir',
+                              style: TextStyle(color: c.textPrimary)),
+                          subtitle: Text('Uygunsuz davranışı bildir',
+                              style: TextStyle(color: c.textSecondary, fontSize: 12)),
                           onTap: onReportTap ?? () {},
                         ),
                       ],
@@ -234,8 +228,8 @@ class ProfilePreviewPage extends StatelessWidget {
                 child: CachedNetworkImage(
                   imageUrl: url,
                   fit: BoxFit.contain,
-                  placeholder: (_, __) => const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary),
+                  placeholder: (_, __) => Center(
+                    child: CircularProgressIndicator(color: context.appColors.primary),
                   ),
                 ),
               ),
