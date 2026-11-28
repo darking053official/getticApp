@@ -857,13 +857,13 @@ class _SettingsPageState extends State<SettingsPage> {
                       spacing: 12,
                       runSpacing: 10,
                       children: [
-                        for (final e in const {
-                          'violet': Color(0xFF8B5CF6),
+                        for (final e in {
+                          'violet': context.appColors.primary,
                           'blue': Color(0xFF3B82F6),
                           'teal': Color(0xFF14B8A6),
                           'pink': Color(0xFFEC4899),
                           'orange': Color(0xFFF97316),
-                          'green': Color(0xFF22C55E),
+                          'green': context.appColors.online,
                         }.entries)
                           GestureDetector(
                             onTap: () => _s.update(() => _s.accentKey = e.key),
