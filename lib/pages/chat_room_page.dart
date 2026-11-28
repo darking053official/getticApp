@@ -232,26 +232,26 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: AppTheme.surface,
-      title: const Text('Mesajı Düzenle',
-          style: TextStyle(color: AppTheme.textPrimary)),
+      backgroundColor: context.appColors.surface,
+      title: Text('Mesajı Düzenle',
+          style: TextStyle(color: context.appColors.textPrimary)),
       content: TextField(
         controller: _c,
         autofocus: true,
         minLines: 1,
         maxLines: 4,
-        style: const TextStyle(color: AppTheme.textPrimary),
+        style: TextStyle(color: context.appColors.textPrimary),
         decoration: const InputDecoration(hintText: 'Yeni mesaj'),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('İptal',
-              style: TextStyle(color: AppTheme.textSecondary)),
+          child: Text('İptal',
+              style: TextStyle(color: context.appColors.textSecondary)),
         ),
         TextButton(
           onPressed: _submit,
-          child: const Text('Kaydet', style: TextStyle(color: AppTheme.primary)),
+          child: Text('Kaydet', style: TextStyle(color: context.appColors.primary)),
         ),
       ],
     );
@@ -334,18 +334,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   static const double _mediaSize = 220;
   String? _typingName;
   String? _mentionQuery;
-  Color _bubbleAccent = AppTheme.primary;
+  Color _bubbleAccent = context.appColors.primary;
   final Map<String, String> _memberAvatars = {};
   static const Map<String, List<Color>> kWallpaperPresets = {
     'ocean': [Color(0xFF0F2027), Color(0xFF2C5364)],
     'forest': [Color(0xFF134E5E), Color(0xFF0F3D2E)],
-    'night': [Color(0xFF0A0A0F), Color(0xFF1A1033)],
+    'night': [context.appColors.background, Color(0xFF1A1033)],
     'rose': [Color(0xFF4A1942), Color(0xFF1A0B1F)],
     'sunset': [Color(0xFF41295A), Color(0xFF2F0743)],
   };
   String get _bubbleKey => 'bubble_color_${widget.conversationId}';
   static const List<Color> kBubbleColors = [
-    Color(0xFF7C3AED), Color(0xFF2563EB), Color(0xFF0D9488), Color(0xFFDB2777),
+    context.appColors.primary, Color(0xFF2563EB), Color(0xFF0D9488), Color(0xFFDB2777),
     Color(0xFFEA580C), Color(0xFF16A34A), Color(0xFF475569),
   ];
   // Parti 1: tepkiler (mesaj id -> emoji -> kullanıcı id listesi), sabitleme
@@ -523,7 +523,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   Widget _buildEmojiPanel() {
     return Container(
       height: 240,
-      color: AppTheme.surface,
+      color: context.appColors.surface,
       child: GridView.builder(
         padding: const EdgeInsets.all(8),
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -649,7 +649,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   void _showPresetPicker() {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.appColors.surface,
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -673,7 +673,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                       ),
-                      border: Border.all(color: AppTheme.inputBorder),
+                      border: Border.all(color: context.appColors.border),
                     ),
                   ),
                 ),
@@ -726,7 +726,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   void _showRoomSettings() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.appColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -735,11 +735,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
                 child: Text('Baloncuk rengi',
                     style: TextStyle(
-                        color: AppTheme.textPrimary, fontWeight: FontWeight.w600)),
+                        color: context.appColors.textPrimary, fontWeight: FontWeight.w600)),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -769,20 +769,20 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppTheme.inputBorder,
+                  color: context.appColors.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
               ListTile(
-                leading: const Icon(Icons.timer_outlined, color: AppTheme.primary),
-                title: const Text('Kaybolan mesajlar',
-                    style: TextStyle(color: AppTheme.textPrimary)),
+                leading: Icon(Icons.timer_outlined, color: context.appColors.primary),
+                title: Text('Kaybolan mesajlar',
+                    style: TextStyle(color: context.appColors.textPrimary)),
                 subtitle: Text(_disappearLabel(_disappear),
-                    style: const TextStyle(color: AppTheme.textSecondary)),
+                    style: TextStyle(color: context.appColors.textSecondary)),
                 onTap: () async {
                   final picked = await showModalBottomSheet<int?>(
                     context: ctx,
-                    backgroundColor: AppTheme.surface,
+                    backgroundColor: context.appColors.surface,
                     builder: (c2) => SafeArea(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -794,11 +794,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                           ])
                             ListTile(
                               title: Text(opt.key,
-                                  style: const TextStyle(
-                                      color: AppTheme.textPrimary)),
+                                  style: TextStyle(
+                                      color: context.appColors.textPrimary)),
                               trailing: _disappear == opt.value
-                                  ? const Icon(Icons.check,
-                                      color: AppTheme.primary)
+                                  ? Icon(Icons.check,
+                                      color: context.appColors.primary)
                                   : null,
                               onTap: () => Navigator.pop(c2, opt.value),
                             ),
@@ -821,13 +821,13 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 },
               ),
               SwitchListTile(
-                secondary: const Icon(Icons.notifications_off_outlined,
-                    color: AppTheme.primary),
-                activeColor: AppTheme.primary,
-                title: const Text('Sessize al',
-                    style: TextStyle(color: AppTheme.textPrimary)),
-                subtitle: const Text('Bu sohbetten bildirim gelmez',
-                    style: TextStyle(color: AppTheme.textSecondary)),
+                secondary: Icon(Icons.notifications_off_outlined,
+                    color: context.appColors.primary),
+                activeColor: context.appColors.primary,
+                title: Text('Sessize al',
+                    style: TextStyle(color: context.appColors.textPrimary)),
+                subtitle: Text('Bu sohbetten bildirim gelmez',
+                    style: TextStyle(color: context.appColors.textSecondary)),
                 value: _muted,
                 onChanged: (v) async {
                   try {
@@ -841,18 +841,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.wallpaper, color: AppTheme.primary),
-                title: const Text('Sohbet arka planı',
-                    style: TextStyle(color: AppTheme.textPrimary)),
+                leading: Icon(Icons.wallpaper, color: context.appColors.primary),
+                title: Text('Sohbet arka planı',
+                    style: TextStyle(color: context.appColors.textPrimary)),
                 onTap: () async {
                   Navigator.pop(ctx);
                   await _pickWallpaper();
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.palette_outlined, color: AppTheme.primary),
-                title: const Text('Hazır arka planlar',
-                    style: TextStyle(color: AppTheme.textPrimary)),
+                leading: Icon(Icons.palette_outlined, color: context.appColors.primary),
+                title: Text('Hazır arka planlar',
+                    style: TextStyle(color: context.appColors.textPrimary)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showPresetPicker();
@@ -948,16 +948,16 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 color: mine
-                    ? AppTheme.primary.withOpacity(0.25)
-                    : AppTheme.surface,
+                    ? context.appColors.primary.withOpacity(0.25)
+                    : context.appColors.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                    color: mine ? AppTheme.primary : AppTheme.inputBorder),
+                    color: mine ? context.appColors.primary : context.appColors.border),
               ),
               child: Text(
                 '${e.key} ${e.value.length}',
-                style: const TextStyle(
-                    color: AppTheme.textPrimary, fontSize: 12),
+                style: TextStyle(
+                    color: context.appColors.textPrimary, fontSize: 12),
               ),
             ),
           );
@@ -999,28 +999,28 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       }
     }
     return Material(
-      color: AppTheme.surface,
+      color: context.appColors.surface,
       child: InkWell(
         onTap: m == null ? null : () => _scrollToMessage(m!.id),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
           child: Row(
             children: [
-              const Icon(Icons.push_pin, size: 16, color: AppTheme.primary),
+              Icon(Icons.push_pin, size: 16, color: context.appColors.primary),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   m == null ? 'Sabitlenen mesaj' : _previewText(m),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: AppTheme.textPrimary, fontSize: 13),
+                  style: TextStyle(
+                      color: context.appColors.textPrimary, fontSize: 13),
                 ),
               ),
               IconButton(
                 tooltip: 'Sabitlemeyi kaldır',
-                icon: const Icon(Icons.close,
-                    size: 18, color: AppTheme.textSecondary),
+                icon: Icon(Icons.close,
+                    size: 18, color: context.appColors.textSecondary),
                 onPressed: () => _setPinned(null),
               ),
             ],
@@ -1048,7 +1048,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.appColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1057,19 +1057,19 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           shrinkWrap: true,
           padding: const EdgeInsets.only(bottom: 12),
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.all(16),
               child: Text('Şuraya ilet',
                   style: TextStyle(
-                      color: AppTheme.textPrimary,
+                      color: context.appColors.textPrimary,
                       fontSize: 16,
                       fontWeight: FontWeight.bold)),
             ),
             if (convs.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.all(16),
                 child: Text('İletilecek başka sohbet yok',
-                    style: TextStyle(color: AppTheme.textSecondary)),
+                    style: TextStyle(color: context.appColors.textSecondary)),
               ),
             ...convs.map((c) {
               final isGroup = c['is_group'] == true;
@@ -1079,9 +1079,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               return ListTile(
                 leading: Icon(
                     isGroup ? Icons.groups : Icons.person,
-                    color: AppTheme.primary),
+                    color: context.appColors.primary),
                 title: Text(name,
-                    style: const TextStyle(color: AppTheme.textPrimary)),
+                    style: TextStyle(color: context.appColors.textPrimary)),
                 onTap: () async {
                   Navigator.pop(ctx);
                   try {
@@ -1108,7 +1108,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.appColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1135,11 +1135,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                   TextField(
                     controller: controller,
                     autofocus: true,
-                    style: const TextStyle(color: AppTheme.textPrimary),
-                    decoration: const InputDecoration(
+                    style: TextStyle(color: context.appColors.textPrimary),
+                    decoration: InputDecoration(
                       hintText: 'Mesajlarda ara...',
                       prefixIcon:
-                          Icon(Icons.search, color: AppTheme.textSecondary),
+                          Icon(Icons.search, color: context.appColors.textSecondary),
                     ),
                     onChanged: (_) => setS(() {}),
                   ),
@@ -1149,8 +1149,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                         ? Center(
                             child: Text(
                               q.isEmpty ? 'Aramak için yazın' : 'Sonuç yok',
-                              style: const TextStyle(
-                                  color: AppTheme.textSecondary),
+                              style: TextStyle(
+                                  color: context.appColors.textSecondary),
                             ),
                           )
                         : ListView.builder(
@@ -1163,16 +1163,16 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                                   m.content ?? '',
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      color: AppTheme.textPrimary),
+                                  style: TextStyle(
+                                      color: context.appColors.textPrimary),
                                 ),
                                 subtitle: Text(
                                   when == null
                                       ? ''
                                       : DateFormat('dd.MM.yyyy HH:mm')
                                           .format(when),
-                                  style: const TextStyle(
-                                      color: AppTheme.textSecondary,
+                                  style: TextStyle(
+                                      color: context.appColors.textSecondary,
                                       fontSize: 12),
                                 ),
                                 onTap: () {
@@ -1395,7 +1395,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: context.appColors.surface,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -1404,7 +1404,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             .map((e) => ListTile(
                   dense: true,
                   title: Text('@${e.value}',
-                      style: const TextStyle(color: AppTheme.textPrimary)),
+                      style: TextStyle(color: context.appColors.textPrimary)),
                   onTap: () => _insertMention(e.value),
                 ))
             .toList(),
@@ -1585,7 +1585,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   void _showAttachmentMenu() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.appColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -1599,7 +1599,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppTheme.inputBorder,
+                  color: context.appColors.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1665,7 +1665,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           const SizedBox(height: 8),
           Text(label,
               style:
-                  const TextStyle(color: AppTheme.textPrimary, fontSize: 12)),
+                  TextStyle(color: context.appColors.textPrimary, fontSize: 12)),
         ],
       ),
     );
@@ -1693,7 +1693,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     return showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        backgroundColor: AppTheme.surface,
+        backgroundColor: context.appColors.surface,
         contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
         content: ClipRRect(
           borderRadius: BorderRadius.circular(12),
@@ -1705,13 +1705,13 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
-            child: const Text('İptal',
-                style: TextStyle(color: AppTheme.textSecondary)),
+            child: Text('İptal',
+                style: TextStyle(color: context.appColors.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
             child:
-                const Text('Gönder', style: TextStyle(color: AppTheme.primary)),
+                Text('Gönder', style: TextStyle(color: context.appColors.primary)),
           ),
         ],
       ),
@@ -1915,7 +1915,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
       ..showSnackBar(
         SnackBar(
           content: Text(msg),
-          backgroundColor: isError ? Colors.redAccent : AppTheme.primary,
+          backgroundColor: isError ? Colors.redAccent : context.appColors.primary,
           behavior: SnackBarBehavior.floating,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -2042,7 +2042,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   void _showAllReactions(Message msg) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.appColors.surface,
       builder: (ctx) => SafeArea(
         child: SizedBox(
           height: 300,
@@ -2074,7 +2074,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     if (msg.isDeleted) return;
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.appColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -2088,7 +2088,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 height: 4,
                 margin: const EdgeInsets.only(top: 12),
                 decoration: BoxDecoration(
-                  color: AppTheme.inputBorder,
+                  color: context.appColors.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -2112,8 +2112,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                       .toList()
                     ..add(IconButton(
                       tooltip: 'Tüm tepkiler',
-                      icon: const Icon(Icons.add_reaction_outlined,
-                          color: AppTheme.primary),
+                      icon: Icon(Icons.add_reaction_outlined,
+                          color: context.appColors.primary),
                       onPressed: () {
                         Navigator.pop(ctx);
                         _showAllReactions(msg);
@@ -2122,18 +2122,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 ),
               const SizedBox(height: 8),
               ListTile(
-                leading: const Icon(Icons.reply, color: AppTheme.primary),
-                title: const Text('Yanıtla',
-                    style: TextStyle(color: AppTheme.textPrimary)),
+                leading: Icon(Icons.reply, color: context.appColors.primary),
+                title: Text('Yanıtla',
+                    style: TextStyle(color: context.appColors.textPrimary)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _startReply(msg);
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.forward, color: AppTheme.primary),
-                title: const Text('İlet',
-                    style: TextStyle(color: AppTheme.textPrimary)),
+                leading: Icon(Icons.forward, color: context.appColors.primary),
+                title: Text('İlet',
+                    style: TextStyle(color: context.appColors.textPrimary)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showForwardSheet(msg);
@@ -2144,12 +2144,12 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     _pinnedId == msg.id.toString()
                         ? Icons.push_pin
                         : Icons.push_pin_outlined,
-                    color: AppTheme.primary),
+                    color: context.appColors.primary),
                 title: Text(
                     _pinnedId == msg.id.toString()
                         ? 'Sabitlemeyi kaldır'
                         : 'Sabitle',
-                    style: const TextStyle(color: AppTheme.textPrimary)),
+                    style: TextStyle(color: context.appColors.textPrimary)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _setPinned(_pinnedId == msg.id.toString()
@@ -2159,9 +2159,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               ),
               if (msg.type == 'text')
                 ListTile(
-                  leading: const Icon(Icons.copy, color: AppTheme.primary),
-                  title: const Text('Kopyala',
-                      style: TextStyle(color: AppTheme.textPrimary)),
+                  leading: Icon(Icons.copy, color: context.appColors.primary),
+                  title: Text('Kopyala',
+                      style: TextStyle(color: context.appColors.textPrimary)),
                   onTap: () {
                     Clipboard.setData(ClipboardData(text: msg.content ?? ''));
                     Navigator.pop(ctx);
@@ -2229,15 +2229,15 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     return showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        title: Text(title, style: const TextStyle(color: AppTheme.textPrimary)),
+        backgroundColor: context.appColors.surface,
+        title: Text(title, style: TextStyle(color: context.appColors.textPrimary)),
         content: Text(content,
-            style: const TextStyle(color: AppTheme.textSecondary)),
+            style: TextStyle(color: context.appColors.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
-            child: const Text('İptal',
-                style: TextStyle(color: AppTheme.textSecondary)),
+            child: Text('İptal',
+                style: TextStyle(color: context.appColors.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
@@ -2291,7 +2291,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: context.appColors.background,
       resizeToAvoidBottomInset: true,
       appBar: _buildAppBar(),
       body: Column(
@@ -2299,8 +2299,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           _buildPinnedBanner(),
           Expanded(
             child: _isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary))
+                ? Center(
+                    child: CircularProgressIndicator(color: context.appColors.primary))
                 : Container(
                     decoration: _wallpaperDecoration(),
                     child: _buildMessagesList(),
@@ -2311,20 +2311,20 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 8),
-              color: AppTheme.surface,
-              child: const Row(
+              color: context.appColors.surface,
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: AppTheme.primary),
+                        strokeWidth: 2, color: context.appColors.primary),
                   ),
                   SizedBox(width: 12),
                   Text('Medya yükleniyor...',
                       style: TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 13)),
+                          color: context.appColors.textSecondary, fontSize: 13)),
                 ],
               ),
             ),
@@ -2338,7 +2338,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     padding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
-                      color: AppTheme.surface,
+                      color: context.appColors.surface,
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: const _TypingDots(),
@@ -2348,8 +2348,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     widget.isGroup
                         ? '${_typingName ?? 'Biri'} yazıyor'
                         : '${widget.otherUser.username} yazıyor',
-                    style: const TextStyle(
-                        color: AppTheme.textSecondary, fontSize: 12),
+                    style: TextStyle(
+                        color: context.appColors.textSecondary, fontSize: 12),
                   ),
                 ],
               ),
@@ -2373,18 +2373,18 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             ? 'yazıyor...'
             : (widget.otherUser.showOnlineStatus ? 'Çevrimiçi' : 'Çevrimdışı'));
     return AppBar(
-      backgroundColor: AppTheme.surface,
+      backgroundColor: context.appColors.surface,
       elevation: 0,
       titleSpacing: 0,
       actions: [
         IconButton(
           tooltip: 'Sohbet ayarları',
-          icon: const Icon(Icons.more_vert, color: AppTheme.textSecondary),
+          icon: Icon(Icons.more_vert, color: context.appColors.textSecondary),
           onPressed: _showRoomSettings,
         ),
         IconButton(
           tooltip: 'Mesajlarda ara',
-          icon: const Icon(Icons.search, color: AppTheme.textSecondary),
+          icon: Icon(Icons.search, color: context.appColors.textSecondary),
           onPressed: _showSearchSheet,
         ),
       ],
@@ -2393,13 +2393,13 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           GestureDetector(
             onTap: widget.isGroup ? _openGroupInfo : _openProfilePreview,
             child: widget.isGroup
-                ? const CircleAvatar(
+                ? CircleAvatar(
                     radius: 20,
-                    backgroundColor: AppTheme.primary,
+                    backgroundColor: context.appColors.primary,
                     child: Icon(Icons.groups, color: Colors.white),
                   )
                 : CircleAvatar(
-                    backgroundColor: AppTheme.primary,
+                    backgroundColor: context.appColors.primary,
                     radius: 20,
                     backgroundImage: widget.otherUser.avatarUrl != null
                         ? CachedNetworkImageProvider(widget.otherUser.avatarUrl!)
@@ -2428,10 +2428,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
+                      color: context.appColors.textPrimary,
                     ),
                   ),
                   Text(
@@ -2439,8 +2439,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     style: TextStyle(
                       fontSize: 12,
                       color: (_isOtherTyping && !widget.isGroup)
-                          ? AppTheme.primary
-                          : AppTheme.textSecondary,
+                          ? context.appColors.primary
+                          : context.appColors.textSecondary,
                       fontStyle: (_isOtherTyping && !widget.isGroup)
                           ? FontStyle.italic
                           : FontStyle.normal,
@@ -2465,11 +2465,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.waving_hand_outlined,
-                size: 56, color: AppTheme.primary.withOpacity(0.6)),
+                size: 56, color: context.appColors.primary.withOpacity(0.6)),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'İlk mesajı sen gönder!',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+              style: TextStyle(color: context.appColors.textSecondary, fontSize: 16),
             ),
           ],
         ),
@@ -2494,10 +2494,10 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               label: Text('$_newWhileAway'),
               child: FloatingActionButton.small(
                 heroTag: 'chat_scroll_bottom_${widget.conversationId}',
-                backgroundColor: AppTheme.surface,
+                backgroundColor: context.appColors.surface,
                 onPressed: () => _scrollToBottom(),
-                child: const Icon(Icons.keyboard_arrow_down,
-                    color: AppTheme.primary),
+                child: Icon(Icons.keyboard_arrow_down,
+                    color: context.appColors.primary),
               ),
             ),
           ),
@@ -2525,7 +2525,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
           AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             color: highlighted
-                ? AppTheme.primary.withOpacity(0.15)
+                ? context.appColors.primary.withOpacity(0.15)
                 : Colors.transparent,
             child: _SwipeToReply(
               enabled: !msg.isDeleted,
@@ -2545,12 +2545,12 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         margin: const EdgeInsets.symmetric(vertical: 10),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: context.appColors.surface,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Text(
           _dateLabel(d),
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          style: TextStyle(color: context.appColors.textSecondary, fontSize: 12),
         ),
       ),
     );
@@ -2575,7 +2575,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     onTap: () => _openMemberProfile(msg.senderId),
                     child: CircleAvatar(
                       radius: 14,
-                      backgroundColor: AppTheme.primary,
+                      backgroundColor: context.appColors.primary,
                       backgroundImage: avatar != null
                           ? CachedNetworkImageProvider(avatar)
                           : null,
@@ -2596,9 +2596,9 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   Widget _buildBubbleCore(Message msg, bool isMine, DateTime? createdAt,
       {bool grouped = false}) {
     final maxW = MediaQuery.of(context).size.width * 0.78;
-    final bubbleColor = isMine ? _bubbleAccent : AppTheme.surface;
-    final textColor = isMine ? Colors.white : AppTheme.textPrimary;
-    final metaColor = isMine ? Colors.white70 : AppTheme.textSecondary;
+    final bubbleColor = isMine ? _bubbleAccent : context.appColors.surface;
+    final textColor = isMine ? Colors.white : context.appColors.textPrimary;
+    final metaColor = isMine ? Colors.white70 : context.appColors.textSecondary;
     final read = isMine && _isReadByOther(msg);
 
     return Align(
@@ -2627,8 +2627,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                   padding: const EdgeInsets.only(bottom: 2),
                   child: Text(
                     _memberNames[msg.senderId] ?? 'Üye',
-                    style: const TextStyle(
-                        color: AppTheme.primary,
+                    style: TextStyle(
+                        color: context.appColors.primary,
                         fontSize: 12,
                         fontWeight: FontWeight.w600),
                   ),
@@ -2642,13 +2642,13 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     children: [
                       Icon(Icons.forward,
                           size: 12,
-                          color: isMine ? Colors.white70 : AppTheme.textSecondary),
+                          color: isMine ? Colors.white70 : context.appColors.textSecondary),
                       const SizedBox(width: 4),
                       Text('İletildi',
                           style: TextStyle(
                               color: isMine
                                   ? Colors.white70
-                                  : AppTheme.textSecondary,
+                                  : context.appColors.textSecondary,
                               fontSize: 11,
                               fontStyle: FontStyle.italic)),
                     ],
@@ -2731,7 +2731,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         borderRadius: BorderRadius.circular(8),
         border: Border(
           left: BorderSide(
-            color: isMine ? Colors.white : AppTheme.primary,
+            color: isMine ? Colors.white : context.appColors.primary,
             width: 3,
           ),
         ),
@@ -2846,12 +2846,12 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         color: Colors.black.withOpacity(0.2),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: const Center(
+      child: Center(
         child: SizedBox(
           width: 22,
           height: 22,
           child: CircularProgressIndicator(
-              strokeWidth: 2, color: AppTheme.primary),
+              strokeWidth: 2, color: context.appColors.primary),
         ),
       ),
     );
@@ -3038,11 +3038,11 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     final mine = r.senderId == _service.currentUser?.id;
 
     return Container(
-      color: AppTheme.surface,
+      color: context.appColors.surface,
       padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
       child: Row(
         children: [
-          Container(width: 3, height: 36, color: AppTheme.primary),
+          Container(width: 3, height: 36, color: context.appColors.primary),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -3050,8 +3050,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               children: [
                 Text(
                   mine ? 'Sen' : widget.otherUser.username,
-                  style: const TextStyle(
-                    color: AppTheme.primary,
+                  style: TextStyle(
+                    color: context.appColors.primary,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -3060,14 +3060,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                   _previewText(r),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: AppTheme.textSecondary, fontSize: 13),
+                  style: TextStyle(
+                      color: context.appColors.textSecondary, fontSize: 13),
                 ),
               ],
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close, color: AppTheme.textSecondary),
+            icon: Icon(Icons.close, color: context.appColors.textSecondary),
             onPressed: () => setState(() => _replyTo = null),
           ),
         ],
@@ -3077,7 +3077,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   Widget _buildInputBar() {
     return Container(
-      color: AppTheme.surface,
+      color: context.appColors.surface,
       child: SafeArea(
         top: false,
         child: Padding(
@@ -3086,15 +3086,15 @@ class _ChatRoomPageState extends State<ChatRoomPage>
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               IconButton(
-                icon: const Icon(Icons.add_circle_outline,
-                    color: AppTheme.primary),
+                icon: Icon(Icons.add_circle_outline,
+                    color: context.appColors.primary),
                 onPressed: _isUploading ? null : _showAttachmentMenu,
               ),
               IconButton(
                 tooltip: 'Emoji',
                 icon: Icon(
                   _showEmoji ? Icons.keyboard : Icons.emoji_emotions_outlined,
-                  color: AppTheme.primary,
+                  color: context.appColors.primary,
                 ),
                 onPressed: _toggleEmoji,
               ),
@@ -3105,26 +3105,26 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                   minLines: 1,
                   maxLines: 5,
                   textCapitalization: TextCapitalization.sentences,
-                  style: const TextStyle(color: AppTheme.textPrimary),
+                  style: TextStyle(color: context.appColors.textPrimary),
                   onChanged: _onTyping,
                   decoration: InputDecoration(
                     hintText: 'Mesaj yaz...',
-                    hintStyle: const TextStyle(color: AppTheme.textSecondary),
+                    hintStyle: TextStyle(color: context.appColors.textSecondary),
                     filled: true,
-                    fillColor: AppTheme.background,
+                    fillColor: context.appColors.background,
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 10),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(24),
-                      borderSide: const BorderSide(color: AppTheme.inputBorder),
+                      borderSide: BorderSide(color: context.appColors.border),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(24),
-                      borderSide: const BorderSide(color: AppTheme.inputBorder),
+                      borderSide: BorderSide(color: context.appColors.border),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(24),
-                      borderSide: const BorderSide(color: AppTheme.primary),
+                      borderSide: BorderSide(color: context.appColors.primary),
                     ),
                   ),
                 ),
@@ -3135,7 +3135,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                 builder: (context, value, _) {
                   final hasText = value.text.trim().isNotEmpty;
                   return CircleAvatar(
-                    backgroundColor: AppTheme.primary,
+                    backgroundColor: context.appColors.primary,
                     radius: 22,
                     child: IconButton(
                       icon: Icon(hasText ? Icons.send : Icons.mic,
@@ -3159,7 +3159,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
     final ss = (_recordSeconds % 60).toString().padLeft(2, '0');
 
     return Container(
-      color: AppTheme.surface,
+      color: context.appColors.surface,
       child: SafeArea(
         top: false,
         child: Padding(
@@ -3175,14 +3175,14 @@ class _ChatRoomPageState extends State<ChatRoomPage>
               const SizedBox(width: 8),
               Text(
                 '$mm:$ss',
-                style: const TextStyle(
-                    color: AppTheme.textPrimary,
+                style: TextStyle(
+                    color: context.appColors.textPrimary,
                     fontSize: 16,
                     fontWeight: FontWeight.w600),
               ),
               const Spacer(),
               CircleAvatar(
-                backgroundColor: AppTheme.primary,
+                backgroundColor: context.appColors.primary,
                 radius: 22,
                 child: IconButton(
                   icon: const Icon(Icons.send, color: Colors.white, size: 20),
@@ -3259,7 +3259,7 @@ class _SwipeToReplyState extends State<_SwipeToReply> {
             child: Center(
               child: Opacity(
                 opacity: (_dx / _trigger).clamp(0.0, 1.0).toDouble(),
-                child: const Icon(Icons.reply, color: AppTheme.primary),
+                child: Icon(Icons.reply, color: context.appColors.primary),
               ),
             ),
           ),
@@ -3518,7 +3518,7 @@ class _ImageViewerPage extends StatelessWidget {
                   imageUrl: url,
                   fit: BoxFit.contain,
                   placeholder: (_, __) =>
-                      const CircularProgressIndicator(color: AppTheme.primary),
+                      CircularProgressIndicator(color: context.appColors.primary),
                   errorWidget: (_, __, ___) => const Icon(
                       Icons.broken_image_outlined,
                       color: Colors.white54,
@@ -3663,8 +3663,8 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                       VideoProgressIndicator(
                         vc,
                         allowScrubbing: true,
-                        colors: const VideoProgressColors(
-                          playedColor: AppTheme.primary,
+                        colors: VideoProgressColors(
+                          playedColor: context.appColors.primary,
                           bufferedColor: Colors.white24,
                           backgroundColor: Colors.white12,
                         ),
@@ -3727,8 +3727,8 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                   style: TextStyle(color: Colors.white70)),
             )
           : !ready
-              ? const Center(
-                  child: CircularProgressIndicator(color: AppTheme.primary))
+              ? Center(
+                  child: CircularProgressIndicator(color: context.appColors.primary))
               : GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _toggleControls,
@@ -3873,8 +3873,8 @@ class _GifSearchSheetState extends State<_GifSearchSheet> {
           EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
         height: height,
-        decoration: const BoxDecoration(
-          color: AppTheme.surface,
+        decoration: BoxDecoration(
+          color: context.appColors.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(
@@ -3884,7 +3884,7 @@ class _GifSearchSheetState extends State<_GifSearchSheet> {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: AppTheme.inputBorder,
+                color: context.appColors.border,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -3893,26 +3893,26 @@ class _GifSearchSheetState extends State<_GifSearchSheet> {
               child: TextField(
                 controller: _searchController,
                 onChanged: _onChanged,
-                style: const TextStyle(color: AppTheme.textPrimary),
+                style: TextStyle(color: context.appColors.textPrimary),
                 decoration: InputDecoration(
                   hintText: 'GIF ara...',
-                  hintStyle: const TextStyle(color: AppTheme.textSecondary),
+                  hintStyle: TextStyle(color: context.appColors.textSecondary),
                   prefixIcon:
-                      const Icon(Icons.search, color: AppTheme.textSecondary),
+                      Icon(Icons.search, color: context.appColors.textSecondary),
                   filled: true,
-                  fillColor: AppTheme.background,
+                  fillColor: context.appColors.background,
                   contentPadding: const EdgeInsets.symmetric(vertical: 8),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: const BorderSide(color: AppTheme.inputBorder),
+                    borderSide: BorderSide(color: context.appColors.border),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: const BorderSide(color: AppTheme.inputBorder),
+                    borderSide: BorderSide(color: context.appColors.border),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
-                    borderSide: const BorderSide(color: AppTheme.primary),
+                    borderSide: BorderSide(color: context.appColors.primary),
                   ),
                 ),
               ),
@@ -3926,29 +3926,29 @@ class _GifSearchSheetState extends State<_GifSearchSheet> {
 
   Widget _buildResults() {
     if (_loading) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppTheme.primary));
+      return Center(
+          child: CircularProgressIndicator(color: context.appColors.primary));
     }
     if (_error) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('GIF\'ler yüklenemedi',
-                style: TextStyle(color: AppTheme.textSecondary)),
+            Text('GIF\'ler yüklenemedi',
+                style: TextStyle(color: context.appColors.textSecondary)),
             TextButton(
               onPressed: () => _search(_searchController.text.trim()),
-              child: const Text('Tekrar dene',
-                  style: TextStyle(color: AppTheme.primary)),
+              child: Text('Tekrar dene',
+                  style: TextStyle(color: context.appColors.primary)),
             ),
           ],
         ),
       );
     }
     if (_gifs.isEmpty) {
-      return const Center(
+      return Center(
         child: Text('Sonuç bulunamadı',
-            style: TextStyle(color: AppTheme.textSecondary)),
+            style: TextStyle(color: context.appColors.textSecondary)),
       );
     }
 
@@ -4022,7 +4022,7 @@ class _TypingDotsState extends State<_TypingDots>
               height: 7,
               margin: const EdgeInsets.symmetric(horizontal: 2),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.4 + 0.6 * lift),
+                color: context.appColors.primary.withOpacity(0.4 + 0.6 * lift),
                 shape: BoxShape.circle,
               ),
             ),
