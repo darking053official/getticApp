@@ -31,6 +31,8 @@ import '../services/app_lock.dart';
 import '../services/e2ee_backup.dart';
 import 'admin_page.dart';
 import '../services/notification_privacy.dart';
+import '../services/captcha_gate.dart';
+import 'password_reset_page.dart';
 import '../services/web_crypto.dart';
 import '../services/supabase_service.dart';
 import 'profile_page.dart';
@@ -199,9 +201,27 @@ class _SettingsPageState extends State<SettingsPage> {
       confirm: 'Gönder',
     );
     if (ok != true) return;
+
+    // Güvenlik doğrulaması (Turnstile), giriş ekranıyla aynı akış
+    final captchaToken = await CaptchaGate.solve(context);
+    if (!mounted) return;
+    if (captchaToken == null) {
+      _snack('Güvenlik doğrulaması tamamlanmadı', isError: true);
+      return;
+    }
+
     try {
-      await Supabase.instance.client.auth.resetPasswordForEmail(email);
-      _snack('Sıfırlama e-postası gönderildi');
+      await Supabase.instance.client.auth
+          .resetPasswordForEmail(email, captchaToken: captchaToken);
+      _snack('Doğrulama kodu e-postanıza gönderildi');
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PasswordResetPage(email: email),
+          ),
+        );
+      }
     } catch (e) {
       _snack('Hata: $e', isError: true);
     }
