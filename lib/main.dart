@@ -127,8 +127,16 @@ class GetticApp extends StatelessWidget {
           title: AppConstants.appName,
           navigatorKey: appNavigatorKey,
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.light,
-          darkTheme: AppTheme.dark,
+          theme: AppTheme.build(
+            brightness: Brightness.light,
+            accent: s.accentKey,
+            font: s.fontKey,
+          ),
+          darkTheme: AppTheme.build(
+            brightness: Brightness.dark,
+            accent: s.accentKey,
+            font: s.fontKey,
+          ),
           themeMode: s.useSystemTheme
               ? ThemeMode.system
               : AppTheme.themeModeFrom(s.themeMode),
@@ -205,6 +213,7 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
     // Uygulama zaten oturumluysa gelen çağrı dinlemesini hemen başlat
     if (Supabase.instance.client.auth.currentUser != null) {
       BanWatcher.start(Supabase.instance.client.auth.currentUser!.id);
+      AppSettings.instance.pullFromServer();
       MeetService.instance.startListening();
     }
 
@@ -218,6 +227,7 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
         OneSignal.login(userId);
         AppState().setCurrentUserId(userId);
         BanWatcher.start(userId);
+        AppSettings.instance.pullFromServer();
         MeetService.instance.startListening();
       } else if (event == AuthChangeEvent.signedOut) {
         BanWatcher.stop();
