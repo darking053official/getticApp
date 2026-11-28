@@ -843,6 +843,74 @@ class _SettingsPageState extends State<SettingsPage> {
                       subtitle: 'Cihazları yönet', onTap: _showActiveSessions),
                 ]),
 
+                _section('Görünüm', c),
+                _card(c, [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                    child: Text('Tema rengi',
+                        style: TextStyle(
+                            color: c.textPrimary, fontWeight: FontWeight.w600)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                    child: Wrap(
+                      spacing: 12,
+                      runSpacing: 10,
+                      children: [
+                        for (final e in const {
+                          'violet': Color(0xFF8B5CF6),
+                          'blue': Color(0xFF3B82F6),
+                          'teal': Color(0xFF14B8A6),
+                          'pink': Color(0xFFEC4899),
+                          'orange': Color(0xFFF97316),
+                          'green': Color(0xFF22C55E),
+                        }.entries)
+                          GestureDetector(
+                            onTap: () => _s.update(() => _s.accentKey = e.key),
+                            child: CircleAvatar(
+                              radius: 18,
+                              backgroundColor: e.value,
+                              child: _s.accentKey == e.key
+                                  ? const Icon(Icons.check,
+                                      color: Colors.white, size: 18)
+                                  : null,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  _divider(c),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                    child: Text('Yazı tipi',
+                        style: TextStyle(
+                            color: c.textPrimary, fontWeight: FontWeight.w600)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final f in const {
+                          'default': 'Varsayılan',
+                          'inter': 'Inter',
+                          'poppins': 'Poppins',
+                          'nunito': 'Nunito',
+                          'lora': 'Lora',
+                          'montserrat': 'Montserrat',
+                        }.entries)
+                          ChoiceChip(
+                            label: Text(f.value),
+                            selected: _s.fontKey == f.key,
+                            onSelected: (_) =>
+                                _s.update(() => _s.fontKey = f.key),
+                          ),
+                      ],
+                    ),
+                  ),
+                ]),
+
                 _section('Gizlilik', c),
                 _card(c, [
                   _switch(c, Icons.visibility_outlined, 'Çevrimiçi durumu göster',
