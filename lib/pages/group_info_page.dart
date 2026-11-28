@@ -1,5 +1,6 @@
 // ============================================================
 // lib/pages/group_info_page.dart
+// (.txt olarak verildi. Projeye eklerken adını group_info_page.dart yapın.)
 // Grup bilgileri: fotoğraf, ad, üyeler, üye ekle/çıkar, yönetici devri,
 // gruptan ayrılma. Geri dönüş: yeni grup adı (String) ya da '__left__'.
 // ============================================================
@@ -13,6 +14,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/theme.dart';
 import '../models/profile.dart';
+import 'profile_preview.dart';
 import '../services/storage_service.dart';
 import '../services/supabase_service.dart';
 
@@ -486,6 +488,12 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                     final isAdminMember = member.id == _adminId;
                     final canManage = _isAdmin && !isMe;
                     return ListTile(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ProfilePreviewPage(profile: member),
+                        ),
+                      ),
                       leading: CircleAvatar(
                         backgroundColor: AppTheme.primary,
                         backgroundImage: member.avatarUrl != null
