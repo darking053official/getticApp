@@ -325,6 +325,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
 
   Message? _replyTo;
   bool _showEmoji = false;
+  // Anında gösterilen, arka planda gönderilen mesajlar (localId -> durum)
+  final Map<String, _Pend> _pend = {};
   // Parti 1: tepkiler (mesaj id -> emoji -> kullanıcı id listesi), sabitleme
   Map<String, Map<String, List<String>>> _reactionUsers = {};
   String? _pinnedId;
@@ -407,6 +409,44 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         await prefs.setString(key, text);
       }
     } catch (_) {}
+  }
+
+  Future<void> _flushPending(_Pend p) async {
+    try {
+      await _service.sendMessage(widget.conversationId, p.text,
+          replyToId: p.replyToId);
+      p.failed = false;
+      // Gerçek mesaj akışa düşmezse geçici kaydı yine de kaldır
+      Future.delayed(const Duration(seconds: 15), () {
+        if (mounted && _pend.remove(p.localId) != null) setState(() {});
+      });
+    } catch (e) {
+      p.failed = true;
+      if (mounted) {
+        _showSnack('Gönderilemedi. Mesajın yanındaki simgeye dokunun', isError: true);
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _retryPending(_Pend p) {
+    p.failed = false;
+    setState(() {});
+    unawaited(_flushPending(p));
+  }
+
+  /// Sunucudan gelen mesajlarla bekleyen (henüz onaylanmamış) mesajları birleştirir.
+  List<Message> _mergePending(List<Message> real) {
+    final me = _service.currentUser?.id;
+    _pend.removeWhere((_, p) => real.any((m) =>
+        m.senderId == me &&
+        m.content == p.text &&
+        m.createdAt.isAfter(p.at.subtract(const Duration(minutes: 1)))));
+    final out = List<Message>.from(real);
+    for (final p in _pend.values) {
+      out.add(p.toMessage(me ?? '', widget.conversationId));
+    }
+    return out;
   }
 
   void _toggleEmoji() {
@@ -984,7 +1024,7 @@ class _ChatRoomPageState extends State<ChatRoomPage>
         final lastIsFromOther = msgs.isNotEmpty && !lastIsMine;
 
         setState(() {
-          _messages = msgs;
+          _messages = _mergePending(msgs);
           _isLoading = false;
           if (hasNewLast && lastIsFromOther) {
             _isOtherTyping = false;
@@ -1220,45 +1260,24 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   // ==========================================
   Future<void> _send() async {
     final text = _controller.text.trim();
-    if (text.isEmpty || _isSending) return;
-    _lastTypingSent = null;
-
+    if (text.isEmpty) return;
     final reply = _replyTo;
     _controller.clear();
+    _lastTypingSent = null;
     HapticFeedback.lightImpact();
 
+    // Mesaj hemen ekrana eklenir, gönderim arka planda yapılır
+    final p = _Pend(text, reply?.id);
+    _pend[p.localId] = p;
     setState(() {
-      _isSending = true;
       _replyTo = null;
+      _messages = [
+        ..._messages,
+        p.toMessage(_service.currentUser?.id ?? '', widget.conversationId),
+      ];
     });
-
-    try {
-      await _service.sendMessage(widget.conversationId, text,
-          replyToId: reply?.id);
-    } catch (e) {
-      final isNetwork = e is SocketException ||
-          e is TimeoutException ||
-          e.toString().contains('SocketException') ||
-          e.toString().contains('ClientException');
-      if (isNetwork) {
-        // Gerçekten çevrimdışıysa mesajı kuyruğa al, bağlantı gelince gönderilir
-        await ChatOutbox.instance.add(widget.conversationId, text, reply?.id);
-        if (mounted) {
-          setState(() => _replyTo = null);
-          _showSnack('Bağlantı yok. Mesaj bağlantı gelince gönderilecek');
-        }
-      } else {
-        // Ağ dışı hata (ör. cihaz onaylı değil): mesajı kutuya geri ver
-        if (mounted) {
-          _controller.text = text;
-          _controller.selection = TextSelection.collapsed(offset: text.length);
-          setState(() => _replyTo = reply);
-          _showSnack('Mesaj gönderilemedi: $e', isError: true);
-        }
-      }
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-    }
+    _scrollToBottom();
+    unawaited(_flushPending(p));
   }
 
   void _openProfilePreview() {
@@ -2333,7 +2352,24 @@ class _ChatRoomPageState extends State<ChatRoomPage>
                     if (createdAt != null)
                       Text(DateFormat('HH:mm').format(createdAt),
                           style: TextStyle(color: metaColor, fontSize: 10)),
-                    if (isMine && !msg.isDeleted && !widget.isGroup) ...[
+                    if (isMine && _pend[msg.id.toString()] != null) ...[
+                      const SizedBox(width: 4),
+                      GestureDetector(
+                        onTap: _pend[msg.id.toString()]!.failed
+                            ? () => _retryPending(_pend[msg.id.toString()]!)
+                            : null,
+                        child: Icon(
+                          _pend[msg.id.toString()]!.failed
+                              ? Icons.error_outline
+                              : Icons.access_time,
+                          size: 14,
+                          color: _pend[msg.id.toString()]!.failed
+                              ? Colors.redAccent
+                              : metaColor,
+                        ),
+                      ),
+                    ],
+                    if (isMine && !msg.isDeleted && !widget.isGroup && _pend[msg.id.toString()] == null) ...[
                       const SizedBox(width: 4),
                       Icon(
                         read ? Icons.done_all : Icons.done,
@@ -3826,4 +3862,27 @@ class _LinkPreviewCardState extends State<_LinkPreviewCard> {
       },
     );
   }
+}
+
+// ============================================================
+// ANINDA GÖSTERİLEN GÖNDERİLEN MESAJ
+// ============================================================
+class _Pend {
+  final String localId = 'local_${DateTime.now().microsecondsSinceEpoch}';
+  final String text;
+  final String? replyToId;
+  final DateTime at = DateTime.now();
+  bool failed = false;
+
+  _Pend(this.text, this.replyToId);
+
+  Message toMessage(String me, String convId) => Message(
+        id: localId,
+        conversationId: convId,
+        senderId: me,
+        content: text,
+        type: 'text',
+        replyToId: replyToId,
+        createdAt: at,
+      );
 }
