@@ -54,6 +54,11 @@ class E2eeChat {
   final Map<String, List<int>> _keyCache = {}; // "conv|kv" -> anahtar
   final Map<String, _DevicePub> _deviceCache = {}; // deviceId -> açık anahtarlar
   final Map<String, Message> _messageCache = {}; // messageId -> çözülmüş mesaj
+  // Çözülemeyen mesajlar: her akış güncellemesinde yeniden denenmesin (kısa süre hatırlanır)
+  final Map<String, DateTime> _failedMsgAt = {};
+  static const Duration _failedTtl = Duration(seconds: 20);
+  // Bulunamayan gönderen cihazlar
+  final Map<String, DateTime> _missingDeviceAt = {};
   // Güncel anahtar önbelleği (gönderim hızı için). Üyelik değişince temizlenir.
   final Map<String, _CachedRef> _currentRef = {};
   // Bulunamayan anahtarlar (her mesaj için tekrar sorgu atmamak için kısa süre hatırlanır)
@@ -72,12 +77,19 @@ class E2eeChat {
   Future<_DevicePub?> _devicePub(String deviceId) async {
     final cached = _deviceCache[deviceId];
     if (cached != null) return cached;
+    final missingAt = _missingDeviceAt[deviceId];
+    if (missingAt != null && DateTime.now().difference(missingAt) < _missingTtl) {
+      return null;
+    }
     final row = await _sb
         .from('devices')
         .select('identity_pub_x25519, identity_pub_ed25519')
         .eq('id', deviceId)
         .maybeSingle();
-    if (row == null) return null;
+    if (row == null) {
+      _missingDeviceAt[deviceId] = DateTime.now();
+      return null;
+    }
     final dp = _DevicePub(
       SimplePublicKey(base64Decode(row['identity_pub_x25519'] as String),
           type: KeyPairType.x25519),
@@ -478,6 +490,10 @@ class E2eeChat {
     final id = row['id'].toString();
     final cached = _messageCache[id];
     if (cached != null) return cached;
+    final failedAt = _failedMsgAt[id];
+    if (failedAt != null && DateTime.now().difference(failedAt) < _failedTtl) {
+      return Message.fromJson({...row, 'content': '', 'decrypt_failed': true});
+    }
 
     final enc = Map<String, dynamic>.from(row['enc'] as Map);
     final text = await decryptEnvelope(row['conversation_id'].toString(), enc);
@@ -503,7 +519,11 @@ class E2eeChat {
       'decrypt_failed': text == null,
       'media_secret': mediaSecret,
     });
-    if (text != null) _messageCache[id] = msg;
+    if (text != null) {
+      _messageCache[id] = msg;
+    } else {
+      _failedMsgAt[id] = DateTime.now();
+    }
     return msg;
   }
 
