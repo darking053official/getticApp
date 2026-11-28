@@ -1,15 +1,17 @@
 import 'dart:io';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../core/app_settings.dart';
 import '../core/theme.dart';
-import '../core/constants.dart';
-import '../core/utils.dart';
 import '../models/profile.dart';
-import '../services/supabase_service.dart';
 import '../services/storage_service.dart';
+import '../services/supabase_service.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -34,8 +36,7 @@ class _ProfilePageState extends State<ProfilePage> {
   // Gizlilik
   bool _showOnline = true;
   bool _showLastSeen = true;
-  bool _showReadReceipts = true;
-  bool _muteNotifications = false;
+  bool _muteAll = false;
 
   // İstatistikler
   int _totalMessages = 0;
@@ -47,23 +48,47 @@ class _ProfilePageState extends State<ProfilePage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _statusController.dispose();
+    _bioController.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     try {
       final p = await _service.getMyProfile();
-      if (mounted) {
-        setState(() {
-          _profile = p;
-          _usernameController.text = p?.username ?? '';
-          _statusController.text = p?.status ?? '';
-          _bioController.text = p?.fullName ?? '';
-          _showOnline = p?.showOnlineStatus ?? true;
-          _showLastSeen = p?.showLastSeen ?? true;
-          _isLoading = false;
-        });
-        _loadStats();
-      }
-    } catch (e) {
+      final muted = await _loadMuteAll();
+      if (!mounted) return;
+      setState(() {
+        _profile = p;
+        _usernameController.text = p?.username ?? '';
+        _statusController.text = p?.status ?? '';
+        _bioController.text = p?.fullName ?? '';
+        _showOnline = p?.showOnlineStatus ?? true;
+        _showLastSeen = p?.showLastSeen ?? true;
+        _muteAll = muted;
+        _isLoading = false;
+      });
+      _loadStats();
+    } catch (_) {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<bool> _loadMuteAll() async {
+    try {
+      final uid = _service.currentUser?.id;
+      if (uid == null) return false;
+      final row = await Supabase.instance.client
+          .from('profiles')
+          .select('notifications_muted')
+          .eq('id', uid)
+          .maybeSingle();
+      return row?['notifications_muted'] == true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -71,18 +96,16 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       final userId = _service.currentUser?.id;
       if (userId == null) return;
-
-      final members = await _service.getMyConversationsWithUnread();
-      int messagesCount = 0;
-      for (final m in members) {
+      final convs = await _service.getMyConversationsWithUnread();
+      int count = 0;
+      for (final m in convs) {
         final msgs = await _service.getMessages(m['conversation_id']);
-        messagesCount += msgs.where((msg) => msg.senderId == userId).length;
+        count += msgs.where((msg) => msg.senderId == userId).length;
       }
-
       if (mounted) {
         setState(() {
-          _totalConversations = members.length;
-          _totalMessages = messagesCount;
+          _totalConversations = convs.length;
+          _totalMessages = count;
         });
       }
     } catch (e) {
@@ -90,52 +113,43 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // ---------- Profil fotoğrafı ----------
+
   Future<void> _pickAvatar() async {
+    final c = context.appColors;
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
-      backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      backgroundColor: c.surface,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 8),
-            Container(
-              width: 40, height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.inputBorder,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text('Profil Fotoğrafı',
+            Text('Profil fotoğrafı',
                 style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: c.textPrimary,
                     fontSize: 18,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
+                    fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: AppTheme.primary),
-              title: const Text('Galeriden Seç',
-                  style: TextStyle(color: AppTheme.textPrimary)),
+              leading: Icon(Icons.photo_library_outlined, color: c.primary),
+              title: Text('Galeriden seç',
+                  style: TextStyle(color: c.textPrimary)),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: AppTheme.primary),
-              title: const Text('Kamera ile Çek',
-                  style: TextStyle(color: AppTheme.textPrimary)),
+              leading: Icon(Icons.camera_alt_outlined, color: c.primary),
+              title:
+                  Text('Kamera ile çek', style: TextStyle(color: c.textPrimary)),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             if (_profile?.avatarUrl != null)
               ListTile(
-                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                title: const Text('Fotoğrafı Kaldır',
-                    style: TextStyle(color: Colors.redAccent)),
-                onTap: () async {
+                leading: Icon(Icons.delete_outline, color: c.danger),
+                title: Text('Fotoğrafı kaldır', style: TextStyle(color: c.danger)),
+                onTap: () {
                   Navigator.pop(ctx);
-                  await _removeAvatar();
+                  _removeAvatar();
                 },
               ),
             const SizedBox(height: 12),
@@ -143,7 +157,6 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       ),
     );
-
     if (source == null) return;
 
     try {
@@ -162,9 +175,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
       final userId = _service.currentUser?.id;
       if (userId == null) return;
-
       final url = await _storage.uploadAvatar(File(picked.path), userId);
-
       if (url != null) {
         await _service.updateProfile(userId, {'avatar_url': url});
         await _load();
@@ -180,18 +191,18 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _removeAvatar() async {
-    final confirm = await _confirm(
-      title: 'Fotoğrafı Kaldır',
+    final ok = await _confirm(
+      title: 'Fotoğrafı kaldır',
       content: 'Profil fotoğrafın kaldırılsın mı?',
       confirm: 'Kaldır',
       isDanger: true,
     );
-    if (confirm != true) return;
-
+    if (ok != true) return;
     try {
       final userId = _service.currentUser?.id;
       if (userId == null) return;
       await _service.updateProfile(userId, {'avatar_url': null});
+      setState(() => _localAvatar = null);
       await _load();
       _snack('Fotoğraf kaldırıldı');
     } catch (e) {
@@ -199,50 +210,9 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _saveProfile() async {
-    final username = _usernameController.text.trim();
-    if (username.isEmpty) {
-      _snack('Kullanıcı adı boş olamaz', isError: true);
-      return;
-    }
-    if (username.length < 3) {
-      _snack('Kullanıcı adı en az 3 karakter olmalı', isError: true);
-      return;
-    }
-
-    setState(() => _isSaving = true);
-    try {
-      final userId = _service.currentUser?.id;
-      if (userId == null) return;
-
-      await _service.updateProfile(userId, {
-        'username': username,
-        'status': _statusController.text.trim(),
-        'full_name': _bioController.text.trim(),
-        'show_online_status': _showOnline,
-        'show_last_seen': _showLastSeen,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-
-      await _load();
-      _snack('Profil güncellendi');
-    } catch (e) {
-      _snack('Hata: $e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
-  Future<void> _shareProfile() async {
-    final username = _profile?.username ?? '';
-    await Clipboard.setData(ClipboardData(
-      text: 'Gettic\'te beni bul: @$username\nhttps://gettic.dpdns.org',
-    ));
-    _snack('Profil linki kopyalandı');
-  }
-
   void _showFullAvatar() {
-    if (_profile?.avatarUrl == null) return;
+    final url = _profile?.avatarUrl;
+    if (url == null) return;
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -253,16 +223,18 @@ class _ProfilePageState extends State<ProfilePage> {
             InteractiveViewer(
               child: Center(
                 child: CachedNetworkImage(
-                  imageUrl: _profile!.avatarUrl!,
+                  imageUrl: url,
                   fit: BoxFit.contain,
-                  placeholder: (_, __) => const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary),
+                  placeholder: (_, __) => Center(
+                    child: CircularProgressIndicator(
+                        color: context.appColors.primary),
                   ),
                 ),
               ),
             ),
             Positioned(
-              top: 40, right: 20,
+              top: 40,
+              right: 20,
               child: IconButton(
                 icon: const Icon(Icons.close, color: Colors.white, size: 30),
                 onPressed: () => Navigator.pop(ctx),
@@ -274,14 +246,67 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  // ---------- Kaydetme ----------
+
+  Future<void> _saveProfile() async {
+    final username = _usernameController.text.trim();
+    if (username.length < 3) {
+      _snack('Kullanıcı adı en az 3 karakter olmalı', isError: true);
+      return;
+    }
+    setState(() => _isSaving = true);
+    try {
+      final userId = _service.currentUser?.id;
+      if (userId == null) return;
+      await _service.updateProfile(userId, {
+        'username': username,
+        'status': _statusController.text.trim(),
+        'full_name': _bioController.text.trim(),
+        'show_online_status': _showOnline,
+        'show_last_seen': _showLastSeen,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      await _load();
+      _snack('Profil güncellendi');
+    } catch (e) {
+      _snack('Hata: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _setMuteAll(bool v) async {
+    setState(() => _muteAll = v);
+    try {
+      final uid = _service.currentUser?.id;
+      if (uid == null) return;
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'notifications_muted': v}).eq('id', uid);
+    } catch (e) {
+      if (mounted) setState(() => _muteAll = !v);
+      _snack('Kaydedilemedi: $e', isError: true);
+    }
+  }
+
+  Future<void> _shareProfile() async {
+    final username = _profile?.username ?? '';
+    await Clipboard.setData(ClipboardData(
+      text: 'Gettic\'te beni bul: @$username\nhttps://gettic.dpdns.org',
+    ));
+    _snack('Profil linki kopyalandı');
+  }
+
+  // ---------- Yardımcılar ----------
+
   void _snack(String msg, {bool isError = false}) {
     if (!mounted) return;
+    final c = context.appColors;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
-        backgroundColor: isError ? Colors.redAccent : AppTheme.primary,
+        backgroundColor: isError ? c.danger : c.primary,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -292,219 +317,183 @@ class _ProfilePageState extends State<ProfilePage> {
     required String confirm,
     bool isDanger = false,
   }) {
+    final c = context.appColors;
     return showDialog<bool>(
       context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        title: Text(title, style: const TextStyle(color: AppTheme.textPrimary)),
-        content: Text(content, style: const TextStyle(color: AppTheme.textSecondary)),
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: Text(title, style: TextStyle(color: c.textPrimary)),
+        content: Text(content, style: TextStyle(color: c.textSecondary)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('İptal', style: TextStyle(color: AppTheme.textSecondary)),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('İptal', style: TextStyle(color: c.textSecondary)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(c, true),
+            onPressed: () => Navigator.pop(ctx, true),
             child: Text(confirm,
-                style: TextStyle(color: isDanger ? Colors.redAccent : AppTheme.primary)),
+                style: TextStyle(color: isDanger ? c.danger : c.primary)),
           ),
         ],
       ),
     );
   }
 
-  @override
-  void dispose() {
-    _usernameController.dispose();
-    _statusController.dispose();
-    _bioController.dispose();
-    super.dispose();
+  String _memberSince() {
+    try {
+      final createdAt = _service.currentUser?.createdAt;
+      if (createdAt == null) return 'Bilinmiyor';
+      return DateFormat('d MMMM yyyy', 'tr_TR')
+          .format(DateTime.parse(createdAt));
+    } catch (_) {
+      return 'Bilinmiyor';
+    }
   }
+
+  int _memberDays() {
+    try {
+      final createdAt = _service.currentUser?.createdAt;
+      if (createdAt == null) return 0;
+      return DateTime.now().difference(DateTime.parse(createdAt)).inDays;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  // ---------- Arayüz ----------
 
   @override
   Widget build(BuildContext context) {
+    final c = context.appColors;
     if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: AppTheme.background,
-        body: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+      return Scaffold(
+        backgroundColor: c.background,
+        body: Center(child: CircularProgressIndicator(color: c.primary)),
       );
     }
 
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: c.background,
       body: CustomScrollView(
         slivers: [
-          _buildSliverAppBar(),
+          _buildHeader(c),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Bio
-                  if (_profile?.fullName != null && _profile!.fullName!.isNotEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      margin: const EdgeInsets.only(bottom: 20),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surface,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: AppTheme.inputBorder),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  if (_profile?.fullName != null &&
+                      _profile!.fullName!.isNotEmpty) ...[
+                    _bioCard(c),
+                    const SizedBox(height: 16),
+                  ],
+                  _statsCard(c),
+                  const SizedBox(height: 24),
+
+                  _sectionHeader('Kişisel bilgiler', c),
+                  _card(c, [
+                    _textField(c,
+                        controller: _usernameController,
+                        icon: Icons.alternate_email,
+                        label: 'Kullanıcı adı',
+                        hint: 'kullanici_adi'),
+                    _divider(c),
+                    _textField(c,
+                        controller: _statusController,
+                        icon: Icons.mood_outlined,
+                        label: 'Durum',
+                        hint: 'Örn: Kod yazıyorum...'),
+                    _divider(c),
+                    _textField(c,
+                        controller: _bioController,
+                        icon: Icons.info_outline,
+                        label: 'Hakkımda',
+                        hint: 'Kendinden bahset...',
+                        maxLines: 3),
+                  ]),
+                  const SizedBox(height: 24),
+
+                  _sectionHeader('Gizlilik ve bildirimler', c),
+                  _card(c, [
+                    _switchTile(c,
+                        icon: Icons.visibility_outlined,
+                        title: 'Çevrimiçi durumumu göster',
+                        subtitle: 'Kapalıyken çevrimiçi görünmezsin',
+                        value: _showOnline,
+                        onChanged: (v) => setState(() => _showOnline = v)),
+                    _divider(c),
+                    _switchTile(c,
+                        icon: Icons.access_time,
+                        title: 'Son görülmemi göster',
+                        subtitle: 'Son görülme zamanın gizlenir',
+                        value: _showLastSeen,
+                        onChanged: (v) => setState(() => _showLastSeen = v)),
+                    _divider(c),
+                    _switchTile(c,
+                        icon: Icons.done_all,
+                        title: 'Okundu bilgisi',
+                        subtitle: 'Kapalıyken mesajlar okundu işaretlenmez',
+                        value: AppSettings.instance.showReadReceipts,
+                        onChanged: (v) => AppSettings.instance
+                            .update(() => AppSettings.instance.showReadReceipts = v)
+                            .then((_) => setState(() {}))),
+                    _divider(c),
+                    _switchTile(c,
+                        icon: Icons.notifications_off_outlined,
+                        title: 'Tüm bildirimleri sessize al',
+                        subtitle: 'Açıkken sana bildirim gelmez',
+                        value: _muteAll,
+                        onChanged: _setMuteAll),
+                  ]),
+                  const SizedBox(height: 24),
+
+                  _sectionHeader('Hesap', c),
+                  _card(c, [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
                         children: [
-                          const Text('HAKKIMDA',
-                              style: TextStyle(
-                                  color: AppTheme.primary,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 1.5)),
-                          const SizedBox(height: 8),
-                          Text(
-                            _profile!.fullName!,
-                            style: const TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 15,
-                              height: 1.5,
+                          Icon(Icons.calendar_today_outlined,
+                              color: c.textSecondary, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Hesap oluşturma',
+                                    style: TextStyle(
+                                        color: c.textSecondary, fontSize: 12)),
+                                const SizedBox(height: 2),
+                                Text(_memberSince(),
+                                    style: TextStyle(
+                                        color: c.textPrimary,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600)),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ),
-
-                  // İstatistikler
-                  _buildStatsCard(),
-
-                  const SizedBox(height: 24),
-
-                  // Kişisel Bilgiler
-                  _sectionHeader('KİŞİSEL BİLGİLER'),
-                  _card([
-                    _textField(
-                      controller: _usernameController,
-                      icon: Icons.alternate_email,
-                      label: 'Kullanıcı Adı',
-                      hint: 'kullanici_adi',
-                    ),
-                    _divider(),
-                    _textField(
-                      controller: _statusController,
-                      icon: Icons.mood_outlined,
-                      label: 'Durum',
-                      hint: 'Örn: Kod yazıyorum...',
-                    ),
-                    _divider(),
-                    _textField(
-                      controller: _bioController,
-                      icon: Icons.info_outline,
-                      label: 'Hakkımda',
-                      hint: 'Kendinden bahset...',
-                      maxLines: 3,
-                    ),
                   ]),
+                  const SizedBox(height: 28),
 
-                  const SizedBox(height: 24),
-
-                  // Gizlilik
-                  _sectionHeader('GİZLİLİK'),
-                  _card([
-                    _switchTile(
-                      icon: Icons.visibility_outlined,
-                      title: 'Çevrimiçi durumumu göster',
-                      subtitle: 'Kapalıyken çevrimiçi görünmezsin',
-                      value: _showOnline,
-                      onChanged: (v) => setState(() => _showOnline = v),
-                    ),
-                    _divider(),
-                    _switchTile(
-                      icon: Icons.access_time,
-                      title: 'Son görülmemi göster',
-                      subtitle: 'Son görülme zamanın gizlenir',
-                      value: _showLastSeen,
-                      onChanged: (v) => setState(() => _showLastSeen = v),
-                    ),
-                    _divider(),
-                    _switchTile(
-                      icon: Icons.done_all,
-                      title: 'Okundu bilgisi',
-                      subtitle: 'Mavi tikler gösterilsin mi?',
-                      value: _showReadReceipts,
-                      onChanged: (v) => setState(() => _showReadReceipts = v),
-                    ),
-                    _divider(),
-                    _switchTile(
-                      icon: Icons.notifications_off_outlined,
-                      title: 'Bildirimleri Sessize Al',
-                      subtitle: 'Tüm bildirimleri kapat',
-                      value: _muteNotifications,
-                      onChanged: (v) => setState(() => _muteNotifications = v),
-                    ),
-                  ]),
-
-                  const SizedBox(height: 24),
-
-                  // Hesap Bilgileri
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppTheme.inputBorder),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.calendar_today_outlined,
-                            color: AppTheme.textSecondary, size: 20),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Hesap Oluşturma',
-                                style: TextStyle(
-                                    color: AppTheme.textSecondary, fontSize: 12)),
-                            Text(
-                              _formatMemberSince(),
-                              style: const TextStyle(
-                                  color: AppTheme.textPrimary,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 32),
-
-                  // Kaydet Butonu
                   SizedBox(
                     width: double.infinity,
-                    height: 52,
+                    height: 54,
                     child: ElevatedButton(
                       onPressed: _isSaving ? null : _saveProfile,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        elevation: 4,
-                        shadowColor: AppTheme.primary.withOpacity(0.5),
-                      ),
                       child: _isSaving
                           ? const SizedBox(
-                              width: 24, height: 24,
+                              width: 22,
+                              height: 22,
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2),
                             )
-                          : const Text(
-                              'Değişiklikleri Kaydet',
+                          : const Text('Değişiklikleri kaydet',
                               style: TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
+                                  fontSize: 16, fontWeight: FontWeight.w700)),
                     ),
                   ),
                 ],
@@ -516,19 +505,22 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildSliverAppBar() {
+  Widget _buildHeader(AppColors c) {
+    final name = _profile?.username ?? '';
     return SliverAppBar(
-      expandedHeight: 280,
+      expandedHeight: 300,
       pinned: true,
-      backgroundColor: AppTheme.background,
+      stretch: true,
+      backgroundColor: c.background,
+      surfaceTintColor: Colors.transparent,
       elevation: 0,
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+        icon: Icon(Icons.arrow_back, color: c.textPrimary),
         onPressed: () => Navigator.pop(context),
       ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.share_outlined, color: AppTheme.textPrimary),
+          icon: Icon(Icons.share_outlined, color: c.textPrimary),
           onPressed: _shareProfile,
         ),
       ],
@@ -536,10 +528,7 @@ class _ProfilePageState extends State<ProfilePage> {
         background: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [
-                AppTheme.primary.withOpacity(0.4),
-                AppTheme.background,
-              ],
+              colors: [c.primary.withOpacity(0.35), c.background],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
             ),
@@ -548,73 +537,69 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const SizedBox(height: 20),
+                const SizedBox(height: 28),
                 GestureDetector(
                   onTap: _showFullAvatar,
                   child: Stack(
                     children: [
                       Container(
+                        padding: const EdgeInsets.all(3),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: AppTheme.primary, width: 3),
+                          gradient: LinearGradient(
+                            colors: [c.primary, c.primary.withOpacity(0.4)],
+                          ),
                           boxShadow: [
                             BoxShadow(
-                              color: AppTheme.primary.withOpacity(0.3),
-                              blurRadius: 20,
-                              spreadRadius: 4,
+                              color: c.primary.withOpacity(0.35),
+                              blurRadius: 24,
+                              spreadRadius: 2,
                             ),
                           ],
                         ),
                         child: CircleAvatar(
-                          radius: 60,
-                          backgroundColor: AppTheme.surface,
+                          radius: 56,
+                          backgroundColor: c.surface,
                           backgroundImage: _localAvatar != null
-                              ? FileImage(_localAvatar!)
+                              ? FileImage(_localAvatar!) as ImageProvider
                               : (_profile?.avatarUrl != null
                                   ? CachedNetworkImageProvider(
                                       _profile!.avatarUrl!)
-                                  : null) as ImageProvider?,
+                                  : null),
                           child: (_localAvatar == null &&
                                   _profile?.avatarUrl == null)
                               ? Text(
-                                  _profile!.username.isNotEmpty
-                                      ? _profile!.username[0].toUpperCase()
-                                      : '?',
+                                  name.isNotEmpty ? name[0].toUpperCase() : '?',
                                   style: const TextStyle(
-                                    fontSize: 45,
+                                    fontSize: 44,
                                     color: Colors.white,
-                                    fontWeight: FontWeight.bold,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 )
                               : null,
                         ),
                       ),
                       Positioned(
-                        bottom: 0, right: 0,
+                        bottom: 0,
+                        right: 0,
                         child: GestureDetector(
                           onTap: _isUploadingAvatar ? null : _pickAvatar,
                           child: Container(
-                            padding: const EdgeInsets.all(10),
+                            padding: const EdgeInsets.all(9),
                             decoration: BoxDecoration(
-                              color: AppTheme.primary,
+                              color: c.primary,
                               shape: BoxShape.circle,
-                              border: Border.all(
-                                  color: AppTheme.background, width: 3),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppTheme.primary.withOpacity(0.5),
-                                  blurRadius: 10,
-                                ),
-                              ],
+                              border: Border.all(color: c.background, width: 3),
                             ),
                             child: _isUploadingAvatar
                                 ? const SizedBox(
-                                    width: 18, height: 18,
+                                    width: 16,
+                                    height: 16,
                                     child: CircularProgressIndicator(
                                         color: Colors.white, strokeWidth: 2),
                                   )
                                 : const Icon(Icons.camera_alt,
-                                    size: 22, color: Colors.white),
+                                    size: 20, color: Colors.white),
                           ),
                         ),
                       ),
@@ -622,30 +607,37 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      _profile?.username ?? '',
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.verified,
-                        color: AppTheme.primary, size: 22),
-                  ],
-                ),
-                const SizedBox(height: 4),
                 Text(
-                  '@${_profile?.username ?? ''}',
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 14,
+                  name,
+                  style: TextStyle(
+                    color: c.textPrimary,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
                   ),
                 ),
+                const SizedBox(height: 2),
+                Text(
+                  '@$name',
+                  style: TextStyle(color: c.textSecondary, fontSize: 14),
+                ),
+                if (_profile?.status != null &&
+                    _profile!.status!.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: c.surface.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: c.border),
+                    ),
+                    child: Text(
+                      _profile!.status!,
+                      style: TextStyle(color: c.textPrimary, fontSize: 13),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -654,104 +646,102 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildStatsCard() {
+  Widget _bioCard(AppColors c) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.inputBorder),
+        border: Border.all(color: c.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('HAKKIMDA',
+              style: TextStyle(
+                  color: c.primary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.4)),
+          const SizedBox(height: 8),
+          Text(_profile!.fullName!,
+              style: TextStyle(color: c.textPrimary, fontSize: 15, height: 1.5)),
+        ],
+      ),
+    );
+  }
+
+  Widget _statsCard(AppColors c) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: c.border),
       ),
       child: Row(
         children: [
-          _statItem('$_totalConversations', 'Sohbet', Icons.chat_bubble_outline),
-          _statDivider(),
-          _statItem('$_totalMessages', 'Mesaj', Icons.message_outlined),
-          _statDivider(),
-          _statItem(_formatMemberDays(), 'Gün', Icons.calendar_today_outlined),
+          _statItem(c, '$_totalConversations', 'Sohbet', Icons.chat_bubble_outline),
+          _statDivider(c),
+          _statItem(c, '$_totalMessages', 'Mesaj', Icons.message_outlined),
+          _statDivider(c),
+          _statItem(c, '${_memberDays()}', 'Gün', Icons.calendar_today_outlined),
         ],
       ),
     );
   }
 
-  String _formatMemberSince() {
-    try {
-      final createdAt = _service.currentUser?.createdAt;
-      if (createdAt == null) return 'Bilinmiyor';
-      final date = DateTime.parse(createdAt);
-      return DateFormat('d MMMM yyyy', 'tr_TR').format(date);
-    } catch (_) {
-      return 'Bilinmiyor';
-    }
-  }
-
-  String _formatMemberDays() {
-    try {
-      final createdAt = _service.currentUser?.createdAt;
-      if (createdAt == null) return '0';
-      final date = DateTime.parse(createdAt);
-      final days = DateTime.now().difference(date).inDays;
-      return '$days';
-    } catch (_) {
-      return '0';
-    }
-  }
-
-  Widget _statItem(String value, String label, IconData icon) {
+  Widget _statItem(AppColors c, String value, String label, IconData icon) {
     return Expanded(
       child: Column(
         children: [
-          Icon(icon, color: AppTheme.primary, size: 20),
+          Icon(icon, color: c.primary, size: 20),
           const SizedBox(height: 8),
           Text(value,
-              style: const TextStyle(
-                  color: AppTheme.textPrimary,
+              style: TextStyle(
+                  color: c.textPrimary,
                   fontSize: 22,
-                  fontWeight: FontWeight.bold)),
+                  fontWeight: FontWeight.w800)),
           const SizedBox(height: 2),
-          Text(label,
-              style: const TextStyle(
-                  color: AppTheme.textSecondary, fontSize: 12)),
+          Text(label, style: TextStyle(color: c.textSecondary, fontSize: 12)),
         ],
       ),
     );
   }
 
-  Widget _statDivider() {
-    return Container(
-      width: 1,
-      height: 40,
-      color: AppTheme.inputBorder,
-    );
-  }
+  Widget _statDivider(AppColors c) =>
+      Container(width: 1, height: 40, color: c.border);
 
-  Widget _sectionHeader(String text, {Color? color}) {
+  Widget _sectionHeader(String text, AppColors c) {
     return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 12),
+      padding: const EdgeInsets.only(left: 4, bottom: 10),
       child: Text(
-        text,
+        text.toUpperCase(),
         style: TextStyle(
-          color: color ?? AppTheme.primary,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.5,
+          color: c.textSecondary,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.1,
         ),
       ),
     );
   }
 
-  Widget _card(List<Widget> children) {
+  Widget _card(AppColors c, List<Widget> children) {
     return Container(
       decoration: BoxDecoration(
-        color: AppTheme.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.inputBorder),
+        border: Border.all(color: c.border.withOpacity(0.6)),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(children: children),
     );
   }
 
-  Widget _textField({
+  Widget _textField(
+    AppColors c, {
     required TextEditingController controller,
     required IconData icon,
     required String label,
@@ -763,13 +753,13 @@ class _ProfilePageState extends State<ProfilePage> {
       child: TextField(
         controller: controller,
         maxLines: maxLines,
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
+        style: TextStyle(color: c.textPrimary, fontSize: 15),
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
-          labelStyle: const TextStyle(color: AppTheme.textSecondary),
-          hintStyle: TextStyle(color: AppTheme.textSecondary.withOpacity(0.5)),
-          prefixIcon: Icon(icon, color: AppTheme.textSecondary, size: 22),
+          labelStyle: TextStyle(color: c.textSecondary),
+          hintStyle: TextStyle(color: c.textHint),
+          prefixIcon: Icon(icon, color: c.textSecondary, size: 22),
           border: InputBorder.none,
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
@@ -779,7 +769,8 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _switchTile({
+  Widget _switchTile(
+    AppColors c, {
     required IconData icon,
     required String title,
     required String subtitle,
@@ -787,21 +778,27 @@ class _ProfilePageState extends State<ProfilePage> {
     required ValueChanged<bool> onChanged,
   }) {
     return SwitchListTile(
-      secondary: Icon(icon, color: AppTheme.textSecondary, size: 22),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      secondary: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: c.primary.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: c.primary, size: 20),
+      ),
       title: Text(title,
-          style: const TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w500)),
+          style: TextStyle(
+              color: c.textPrimary, fontSize: 15, fontWeight: FontWeight.w600)),
       subtitle: Text(subtitle,
-          style: const TextStyle(
-              color: AppTheme.textSecondary, fontSize: 12)),
+          style: TextStyle(color: c.textSecondary, fontSize: 12)),
       value: value,
-      activeColor: AppTheme.primary,
+      activeColor: c.primary,
       onChanged: onChanged,
     );
   }
 
-  Widget _divider() =>
-      const Divider(color: AppTheme.inputBorder, height: 1, indent: 56);
+  Widget _divider(AppColors c) =>
+      Divider(color: c.border.withOpacity(0.6), height: 1, indent: 68, endIndent: 16);
 }
