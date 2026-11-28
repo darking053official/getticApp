@@ -14,6 +14,7 @@ jobs:
   build-windows:
     name: Build Windows EXE
     runs-on: windows-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -54,12 +55,10 @@ jobs:
           if (-not $vsPath) { throw "Visual Studio kurulum yolu bulunamadı" }
 
           $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-          $p = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList `
-            'modify','--installPath',"`"$vsPath`"", `
-            '--quiet','--wait','--norestart','--nocache', `
-            '--add','Microsoft.VisualStudio.Component.VC.ATL'
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
-            throw "ATL kurulumu başarısız oldu. Çıkış kodu: $($p.ExitCode)"
+          & $installer modify --installPath $vsPath --add Microsoft.VisualStudio.Component.VC.ATL --quiet --wait --norestart
+          $code = $LASTEXITCODE
+          if ($code -ne 0 -and $code -ne 3010) {
+            throw "ATL kurulumu başarısız oldu. Çıkış kodu: $code"
           }
 
           $atl = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Recurse -Filter atlstr.h -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -67,12 +66,12 @@ jobs:
           Write-Host "ATL hazır: $($atl.DirectoryName)"
 
       - name: Get dependencies
+        shell: pwsh
         run: flutter pub get
 
       - name: Build Windows release
         shell: pwsh
-        run: |
-          flutter build windows --release
+        run: flutter build windows --release
 
       - name: Sign Windows binaries (optional)
         shell: pwsh
