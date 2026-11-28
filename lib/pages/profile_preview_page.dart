@@ -228,8 +228,8 @@ class ProfilePreviewPage extends StatelessWidget {
                 child: CachedNetworkImage(
                   imageUrl: url,
                   fit: BoxFit.contain,
-                  placeholder: (_, __) => const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary),
+                  placeholder: (_, __) => Center(
+                    child: CircularProgressIndicator(color: context.appColors.primary),
                   ),
                 ),
               ),
