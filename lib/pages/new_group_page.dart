@@ -155,7 +155,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: isError ? Colors.redAccent : AppTheme.primary,
+      backgroundColor: isError ? Colors.redAccent : context.appColors.primary,
       behavior: SnackBarBehavior.floating,
     ));
   }
@@ -165,24 +165,24 @@ class _NewGroupPageState extends State<NewGroupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: context.appColors.background,
       appBar: AppBar(
         title: const Text('Yeni grup'),
-        backgroundColor: AppTheme.background,
+        backgroundColor: context.appColors.background,
         elevation: 0,
         actions: [
           TextButton(
             onPressed: _creating ? null : _create,
             child: _creating
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: AppTheme.primary))
-                : const Text(
+                        strokeWidth: 2, color: context.appColors.primary))
+                : Text(
                     'Oluştur',
                     style: TextStyle(
-                        color: AppTheme.primary,
+                        color: context.appColors.primary,
                         fontWeight: FontWeight.bold,
                         fontSize: 16),
                   ),
@@ -192,7 +192,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
       body: Column(
         children: [
           _buildHeader(),
-          const Divider(color: AppTheme.inputBorder, height: 1),
+          Divider(color: context.appColors.border, height: 1),
           if (_selected.isNotEmpty) _buildChips(),
           _buildSearch(),
           Expanded(child: _buildResults()),
@@ -210,10 +210,10 @@ class _NewGroupPageState extends State<NewGroupPage> {
             onTap: _creating ? null : _pickAvatar,
             child: CircleAvatar(
               radius: 26,
-              backgroundColor: AppTheme.surface,
+              backgroundColor: context.appColors.surface,
               backgroundImage: _avatar != null ? FileImage(_avatar!) : null,
               child: _avatar == null
-                  ? const Icon(Icons.camera_alt, color: AppTheme.textSecondary)
+                  ? Icon(Icons.camera_alt, color: context.appColors.textSecondary)
                   : null,
             ),
           ),
@@ -223,18 +223,18 @@ class _NewGroupPageState extends State<NewGroupPage> {
               controller: _nameCtl,
               enabled: !_creating,
               maxLength: 60,
-              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
-              decoration: const InputDecoration(
+              style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
+              decoration: InputDecoration(
                 hintText: 'Grup adı',
                 counterText: '',
                 border: UnderlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.inputBorder),
+                  borderSide: BorderSide(color: context.appColors.border),
                 ),
                 enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.inputBorder),
+                  borderSide: BorderSide(color: context.appColors.border),
                 ),
                 focusedBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.primary),
+                  borderSide: BorderSide(color: context.appColors.primary),
                 ),
               ),
             ),
@@ -253,7 +253,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
         children: _selected.values.map((u) {
           return Chip(
             avatar: CircleAvatar(
-              backgroundColor: AppTheme.primary,
+              backgroundColor: context.appColors.primary,
               backgroundImage: u.avatarUrl != null
                   ? CachedNetworkImageProvider(u.avatarUrl!)
                   : null,
@@ -263,11 +263,11 @@ class _NewGroupPageState extends State<NewGroupPage> {
                   : null,
             ),
             label: Text(u.username,
-                style: const TextStyle(color: AppTheme.textPrimary)),
-            backgroundColor: AppTheme.surface,
-            side: const BorderSide(color: AppTheme.inputBorder),
+                style: TextStyle(color: context.appColors.textPrimary)),
+            backgroundColor: context.appColors.surface,
+            side: BorderSide(color: context.appColors.border),
             deleteIcon:
-                const Icon(Icons.close, size: 16, color: AppTheme.textSecondary),
+                Icon(Icons.close, size: 16, color: context.appColors.textSecondary),
             onDeleted: _creating ? null : () => _toggle(u),
           );
         }).toList(),
@@ -281,10 +281,10 @@ class _NewGroupPageState extends State<NewGroupPage> {
       child: TextField(
         controller: _searchCtl,
         enabled: !_creating,
-        style: const TextStyle(color: AppTheme.textPrimary),
-        decoration: const InputDecoration(
+        style: TextStyle(color: context.appColors.textPrimary),
+        decoration: InputDecoration(
           hintText: 'Kullanıcı ara (en az 2 harf)',
-          prefixIcon: Icon(Icons.search, color: AppTheme.textSecondary),
+          prefixIcon: Icon(Icons.search, color: context.appColors.textSecondary),
         ),
         onChanged: _onSearchChanged,
       ),
@@ -293,19 +293,19 @@ class _NewGroupPageState extends State<NewGroupPage> {
 
   Widget _buildResults() {
     if (_searching) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppTheme.primary));
+      return Center(
+          child: CircularProgressIndicator(color: context.appColors.primary));
     }
     if (_searchCtl.text.trim().length < 2) {
-      return const Center(
+      return Center(
         child: Text('Üye eklemek için kullanıcı adı yazın',
-            style: TextStyle(color: AppTheme.textSecondary)),
+            style: TextStyle(color: context.appColors.textSecondary)),
       );
     }
     if (_results.isEmpty) {
-      return const Center(
+      return Center(
         child: Text('Kullanıcı bulunamadı',
-            style: TextStyle(color: AppTheme.textSecondary)),
+            style: TextStyle(color: context.appColors.textSecondary)),
       );
     }
     return ListView.builder(
@@ -317,7 +317,7 @@ class _NewGroupPageState extends State<NewGroupPage> {
         return ListTile(
           enabled: !_creating,
           leading: CircleAvatar(
-            backgroundColor: AppTheme.primary,
+            backgroundColor: context.appColors.primary,
             backgroundImage: u.avatarUrl != null
                 ? CachedNetworkImageProvider(u.avatarUrl!)
                 : null,
@@ -326,10 +326,10 @@ class _NewGroupPageState extends State<NewGroupPage> {
                 : null,
           ),
           title: Text(u.username,
-              style: const TextStyle(color: AppTheme.textPrimary)),
+              style: TextStyle(color: context.appColors.textPrimary)),
           trailing: Icon(
             isOn ? Icons.check_circle : Icons.add_circle_outline,
-            color: isOn ? AppTheme.primary : AppTheme.textSecondary,
+            color: isOn ? context.appColors.primary : context.appColors.textSecondary,
           ),
           onTap: () => _toggle(u),
         );
