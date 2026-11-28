@@ -1,17 +1,3 @@
-// ============================================================
-// lib/services/captcha_gate.dart
-// (.txt olarak verildi. Projeye eklerken adını captcha_gate.dart yapın.)
-// Cloudflare Turnstile doğrulaması.
-//  - Android / iOS: WebView penceresi (webview_flutter).
-//  - Windows / macOS / Linux: sistem tarayıcısı açılır, doğrulama sayfası
-//    (Supabase Edge Function: captcha-page) token'ı 127.0.0.1 üzerindeki
-//    geçici yerel sunucuya gönderir.
-// Gerekli paketler: webview_flutter, url_launcher
-// Cloudflare Turnstile widget'ının hostname listesine şunlar eklenmeli:
-//   gettic.dpdns.org
-//   ayucfychcemsvzlgsdqq.supabase.co
-// ============================================================
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
