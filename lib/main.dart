@@ -93,18 +93,9 @@ void main() async {
   WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
 
   // Uygulama açıkken bildirim: ayar kapalıysa, ya da kullanıcı zaten o sohbetteyse gösterme
+  // Uygulama açıkken hiçbir bildirim gösterilmez (mesaj ve arama uygulamanın kendi ekranında görünür)
   OneSignal.Notifications.addForegroundWillDisplayListener((event) {
-    final conversationId =
-        event.notification.additionalData?['conversation_id'] as String?;
-
-    if (!AppSettings.instance.inAppNotifications) {
-      event.preventDefault();
-      return;
-    }
-    if (conversationId != null &&
-        !AppState().shouldShowNotification(conversationId)) {
-      event.preventDefault();
-    }
+    event.preventDefault();
   });
 
   runApp(const ProviderScope(child: GetticApp()));
