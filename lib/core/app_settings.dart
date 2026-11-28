@@ -10,8 +10,11 @@
 //  - Güvenlik: main.dart (otomatik kilit süresi)
 // ============================================================
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AppSettings extends ChangeNotifier {
   AppSettings._();
@@ -26,6 +29,8 @@ class AppSettings extends ChangeNotifier {
   bool useSystemTheme = true;
   String themeMode = 'Karanlık'; // 'Karanlık' | 'Aydınlık'
   double fontScale = 1.0; // 0.8 - 1.5
+  String accentKey = 'violet'; // violet | blue | teal | pink | orange | green
+  String fontKey = 'default'; // default | inter | poppins | nunito | lora | montserrat
 
   // ---- Gizlilik ----
   bool showReadReceipts = true; // kapalıysa mesajlar okundu işaretlenmez
@@ -76,6 +81,38 @@ class AppSettings extends ChangeNotifier {
     change();
     notifyListeners();
     await _save();
+    unawaited(pushToServer());
+  }
+
+  /// Ayarları hesaba bağlı olarak sunucuda saklar (uygulama silinse de kalır).
+  Future<void> pushToServer() async {
+    try {
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid == null) return;
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'app_prefs': toJson()}).eq('id', uid);
+    } catch (_) {}
+  }
+
+  /// Oturum açılınca sunucudaki ayarları yerel ayarlara uygular.
+  Future<void> pullFromServer() async {
+    try {
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid == null) return;
+      final row = await Supabase.instance.client
+          .from('profiles')
+          .select('app_prefs')
+          .eq('id', uid)
+          .maybeSingle();
+      final j = row?['app_prefs'];
+      if (j is Map && j.isNotEmpty) {
+        await importJson(Map<String, dynamic>.from(j));
+        notifyListeners();
+      } else {
+        await pushToServer();
+      }
+    } catch (_) {}
   }
 
   /// Tüm ayarları varsayılana döndürür.
@@ -105,6 +142,8 @@ class AppSettings extends ChangeNotifier {
   Map<String, dynamic> toJson() => {
         'useSystemTheme': useSystemTheme,
         'themeMode': themeMode,
+        'accentKey': accentKey,
+        'fontKey': fontKey,
         'fontScale': fontScale,
         'showReadReceipts': showReadReceipts,
         'showTypingIndicator': showTypingIndicator,
@@ -128,6 +167,8 @@ class AppSettings extends ChangeNotifier {
     String s(String k, String d) => j[k] is String ? j[k] as String : d;
 
     final theme = s('themeMode', themeMode);
+    accentKey = s('accentKey', accentKey);
+    fontKey = s('fontKey', fontKey);
     final scale = j['fontScale'] is num ? (j['fontScale'] as num).toDouble() : fontScale;
     final lock = j['autoLockMinutes'] is num ? (j['autoLockMinutes'] as num).toInt() : autoLockMinutes;
 
@@ -166,6 +207,8 @@ class AppSettings extends ChangeNotifier {
 
       useSystemTheme = b('useSystemTheme', useSystemTheme);
       themeMode = s('themeMode', themeMode);
+      accentKey = s('accentKey', accentKey);
+      fontKey = s('fontKey', fontKey);
       fontScale = (p.getDouble('${_p}fontScale') ?? fontScale).clamp(0.8, 1.5).toDouble();
       showReadReceipts = b('showReadReceipts', showReadReceipts);
       showTypingIndicator = b('showTypingIndicator', showTypingIndicator);
@@ -195,6 +238,8 @@ class AppSettings extends ChangeNotifier {
 
       await p.setBool('${_p}useSystemTheme', useSystemTheme);
       await p.setString('${_p}themeMode', themeMode);
+      await p.setString('${_p}accentKey', accentKey);
+      await p.setString('${_p}fontKey', fontKey);
       await p.setDouble('${_p}fontScale', fontScale);
       await p.setBool('${_p}showReadReceipts', showReadReceipts);
       await p.setBool('${_p}showTypingIndicator', showTypingIndicator);
