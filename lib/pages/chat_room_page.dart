@@ -32,6 +32,7 @@ import '../services/e2ee_media.dart';
 import '../services/e2ee_chat.dart';
 import '../services/chat_cache.dart';
 import '../services/chat_prefs_service.dart';
+import '../core/app_settings.dart';
 
 // ============================================================
 // AYARLAR
@@ -1261,6 +1262,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   }
 
   void _markRead() {
+    // Okundu bilgisi kapalıyken mesajlar okundu işaretlenmez
+    if (!AppSettings.instance.showReadReceipts) return;
     if (!_isForeground) return;
     if (_markReadDebounce?.isActive ?? false) return;
     _markReadDebounce = Timer(const Duration(seconds: 1), () {});
@@ -1439,6 +1442,8 @@ class _ChatRoomPageState extends State<ChatRoomPage>
   }
 
   Future<void> _sendTypingEvent() async {
+    // Yazıyor göstergesi kapalıysa karşı tarafa bildirilmez
+    if (!AppSettings.instance.showTypingIndicator) return;
     try {
       await _service.sendTypingEvent(
         widget.conversationId,
