@@ -8,6 +8,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 // ============================================================
 // RENK PALETİ (açık ve koyu tema için ayrı değerler)
@@ -146,10 +147,52 @@ class AppTheme {
   // ==========================================
   // Not: Inter yazı tipi pubspec.yaml'da tanımlı değilse Flutter varsayılanına
   // düşer. Gerçekten kullanmak için pubspec'e fonts bölümü ekleyin.
-  static const String _fontFamily = 'Inter';
+  static String? _fontFamily = 'Inter';
 
   static final ThemeData dark = _build(AppColors.dark, Brightness.dark);
   static final ThemeData light = _build(AppColors.light, Brightness.light);
+
+  /// Ayarlardan gelen renk ve yazı tipiyle tema üretir.
+  static ThemeData build({
+    required Brightness brightness,
+    String accent = 'violet',
+    String font = 'default',
+  }) {
+    _fontFamily = _fontFamilyFor(font);
+    final dark = brightness == Brightness.dark;
+    final base = dark ? AppColors.dark : AppColors.light;
+    return _build(base.copyWith(primary: _accentFor(accent, dark)), brightness);
+  }
+
+  static String? _fontFamilyFor(String key) {
+    switch (key) {
+      case 'inter':
+        return GoogleFonts.inter().fontFamily;
+      case 'poppins':
+        return GoogleFonts.poppins().fontFamily;
+      case 'nunito':
+        return GoogleFonts.nunito().fontFamily;
+      case 'lora':
+        return GoogleFonts.lora().fontFamily;
+      case 'montserrat':
+        return GoogleFonts.montserrat().fontFamily;
+      default:
+        return null;
+    }
+  }
+
+  static Color _accentFor(String key, bool dark) {
+    const map = <String, List<Color>>{
+      'violet': [Color(0xFF8B5CF6), Color(0xFF7C3AED)],
+      'blue': [Color(0xFF60A5FA), Color(0xFF2563EB)],
+      'teal': [Color(0xFF2DD4BF), Color(0xFF0D9488)],
+      'pink': [Color(0xFFF472B6), Color(0xFFDB2777)],
+      'orange': [Color(0xFFFB923C), Color(0xFFEA580C)],
+      'green': [Color(0xFF4ADE80), Color(0xFF16A34A)],
+    };
+    final pair = map[key] ?? map['violet']!;
+    return dark ? pair[0] : pair[1];
+  }
 
   /// Eski API ile uyum için
   static ThemeData get darkTheme => dark;
