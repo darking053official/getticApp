@@ -1,10 +1,3 @@
-// ============================================================
-// lib/pages/password_reset_page.dart
-// (.txt olarak verildi. Projeye eklerken adını password_reset_page.dart yapın.)
-// Uygulama içi şifre sıfırlama: e-postadaki 6 haneli kod + yeni şifre.
-// Web sitesine yönlendirme yok.
-// ============================================================
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -38,8 +31,8 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
     final p1 = _passCtl.text;
     final p2 = _pass2Ctl.text;
 
-    if (code.length < 6) {
-      setState(() => _error = 'E-postadaki kodu girin');
+    if (!RegExp(r'^\d{6,8}$').hasMatch(code)) {
+      setState(() => _error = 'E-postadaki kodu (6-8 rakam) girin');
       return;
     }
     if (p1.length < 6) {
@@ -93,27 +86,27 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.background,
+      backgroundColor: context.appColors.background,
       appBar: AppBar(
         title: const Text('Şifre sıfırla'),
-        backgroundColor: AppTheme.background,
+        backgroundColor: context.appColors.background,
         elevation: 0,
       ),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
           Text(
-            '${widget.email} adresine gönderilen 6 haneli kodu ve yeni şifrenizi girin.',
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            '${widget.email} adresine gönderilen kodu (6-8 rakam) ve yeni şifrenizi girin.',
+            style: TextStyle(color: context.appColors.textSecondary, fontSize: 14),
           ),
           const SizedBox(height: 24),
           TextField(
             controller: _codeCtl,
             keyboardType: TextInputType.number,
-            maxLength: 6,
+            maxLength: 8,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-                color: AppTheme.textPrimary, fontSize: 22, letterSpacing: 6),
+            style: TextStyle(
+                color: context.appColors.textPrimary, fontSize: 22, letterSpacing: 6),
             decoration: const InputDecoration(
               labelText: 'Doğrulama kodu',
               counterText: '',
@@ -123,14 +116,14 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
           TextField(
             controller: _passCtl,
             obscureText: true,
-            style: const TextStyle(color: AppTheme.textPrimary),
+            style: TextStyle(color: context.appColors.textPrimary),
             decoration: const InputDecoration(labelText: 'Yeni şifre'),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _pass2Ctl,
             obscureText: true,
-            style: const TextStyle(color: AppTheme.textPrimary),
+            style: TextStyle(color: context.appColors.textPrimary),
             decoration: const InputDecoration(labelText: 'Yeni şifre (tekrar)'),
           ),
           if (_error != null) ...[
